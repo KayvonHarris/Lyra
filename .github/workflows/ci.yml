@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate workspace manifest
+        run: cargo metadata --format-version 1 --no-deps
+
+      - name: Detect Rust packages
+        id: packages
+        shell: bash
+        run: |
+          if find . -mindepth 2 -name Cargo.toml -not -path './target/*' | grep -q .; then
+            echo "has_packages=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_packages=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check formatting
+        if: steps.packages.outputs.has_packages == 'true'
+        run: cargo fmt --all -- --check
+
+      - name: Cargo check
+        if: steps.packages.outputs.has_packages == 'true'
+        run: cargo check --workspace --all-targets --all-features
+
+      - name: Clippy
+        if: steps.packages.outputs.has_packages == 'true'
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        if: steps.packages.outputs.has_packages == 'true'
+        run: cargo test --workspace --all-features
+
+      - name: Release build
+        if: steps.packages.outputs.has_packages == 'true'
+        run: cargo build --workspace --release
