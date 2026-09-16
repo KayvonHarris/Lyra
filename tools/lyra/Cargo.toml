@@ -1,0 +1,8 @@
+[package]
+name = "lyra"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lyra-driver = { path = "../../crates/lyra-driver" }
