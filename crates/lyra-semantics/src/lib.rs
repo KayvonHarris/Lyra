@@ -57,10 +57,20 @@ impl Analyzer {
                 name, value, span, ..
             } => {
                 let ty = self.check_expression(value);
-                if self.current_scope().contains_key(name) {
-                    self.error(format!("variable `{name}` is already defined in this scope"), *span);
+                let duplicate = self
+                    .scopes
+                    .last()
+                    .is_some_and(|scope| scope.contains_key(name));
+
+                if duplicate {
+                    self.error(
+                        format!("variable `{name}` is already defined in this scope"),
+                        *span,
+                    );
+                } else if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert(name.clone(), ty);
                 } else {
-                    self.current_scope().insert(name.clone(), ty);
+                    self.error("internal semantic error: no active scope", *span);
                 }
             }
             Statement::Return { value, .. } => {
@@ -139,7 +149,7 @@ impl Analyzer {
             | BinaryOperator::LessEqual
             | BinaryOperator::Greater
             | BinaryOperator::GreaterEqual => {
-                if self.numeric_pair(left, right) {
+                if Self::numeric_pair(left, right) {
                     Type::Boolean
                 } else {
                     self.error("comparison operators require numeric operands", span);
@@ -147,7 +157,7 @@ impl Analyzer {
                 }
             }
             BinaryOperator::Equal | BinaryOperator::NotEqual => {
-                if left == right || self.numeric_pair(left, right) {
+                if left == right || Self::numeric_pair(left, right) {
                     Type::Boolean
                 } else {
                     self.error("equality operands must have compatible types", span);
@@ -166,7 +176,7 @@ impl Analyzer {
     }
 
     fn check_arithmetic(&mut self, left: Type, right: Type, span: Span) -> Type {
-        if !self.numeric_pair(left, right) {
+        if !Self::numeric_pair(left, right) {
             self.error("arithmetic operators require numeric operands", span);
             return Type::Unknown;
         }
@@ -178,7 +188,7 @@ impl Analyzer {
         }
     }
 
-    fn numeric_pair(&self, left: Type, right: Type) -> bool {
+    fn numeric_pair(left: Type, right: Type) -> bool {
         matches!(left, Type::Integer | Type::Float) && matches!(right, Type::Integer | Type::Float)
     }
 
@@ -199,12 +209,6 @@ impl Analyzer {
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
-    }
-
-    fn current_scope(&mut self) -> &mut HashMap<String, Type> {
-        self.scopes
-            .last_mut()
-            .expect("semantic analysis must have an active scope")
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
@@ -256,5 +260,50 @@ mod tests {
     fn promotes_mixed_numeric_arithmetic_to_float() {
         let analysis = analyze_source("fn main() { let speed = 60 + 5.5; return speed; }");
         assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_boolean_negation_of_number() {
+        let analysis = analyze_source("fn main() { return !42; }");
+        assert!(analysis.diagnostics[0].message.contains("boolean operand"));
+    }
+
+    #[test]
+    fn rejects_numeric_negation_of_boolean() {
+        let analysis = analyze_source("fn main() { return -true; }");
+        assert!(analysis.diagnostics[0].message.contains("numeric operand"));
+    }
+
+    #[test]
+    fn rejects_logical_operator_on_numbers() {
+        let analysis = analyze_source("fn main() { return 1 && 2; }");
+        assert!(analysis.diagnostics[0].message.contains("boolean operands"));
+    }
+
+    #[test]
+    fn rejects_comparison_of_non_numeric_values() {
+        let analysis = analyze_source("fn main() { return \"a\" < \"b\"; }");
+        assert!(analysis.diagnostics[0].message.contains("numeric operands"));
+    }
+
+    #[test]
+    fn rejects_incompatible_equality() {
+        let analysis = analyze_source("fn main() { return true == 1; }");
+        assert!(analysis.diagnostics[0].message.contains("compatible types"));
+    }
+
+    #[test]
+    fn accepts_numeric_equality_across_integer_and_float() {
+        let analysis = analyze_source("fn main() { return 1 == 1.0; }");
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn variables_do_not_leak_between_functions() {
+        let analysis = analyze_source(
+            "fn first() { let speed = 65; return speed; } fn second() { return speed; }",
+        );
+        assert_eq!(analysis.diagnostics.len(), 1);
+        assert!(analysis.diagnostics[0].message.contains("unknown identifier"));
     }
 }
