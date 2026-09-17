@@ -13,5 +13,8 @@ pub struct CompileOutput {
 pub fn compile(source: &str) -> CompileOutput {
     let tokens = lyra_lexer::tokenize(source);
     let (module, diagnostics) = lyra_parser::parse(&tokens);
-    CompileOutput { module, diagnostics }
+    CompileOutput {
+        module,
+        diagnostics,
+    }
 }
