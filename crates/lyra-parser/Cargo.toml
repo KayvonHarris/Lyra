@@ -8,3 +8,4 @@ license.workspace = true
 lyra-ast = { path = "../lyra-ast" }
 lyra-diagnostics = { path = "../lyra-diagnostics" }
 lyra-lexer = { path = "../lyra-lexer" }
+lyra-span = { path = "../lyra-span" }
