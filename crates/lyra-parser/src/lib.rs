@@ -157,10 +157,7 @@ impl<'a> Parser<'a> {
     fn parse_binary(&mut self, minimum_precedence: u8) -> Option<Expression> {
         let mut left = self.parse_unary()?;
 
-        loop {
-            let Some((operator, precedence)) = self.current_binary_operator() else {
-                break;
-            };
+        while let Some((operator, precedence)) = self.current_binary_operator() {
             if precedence < minimum_precedence {
                 break;
             }
