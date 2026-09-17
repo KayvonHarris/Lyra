@@ -11,8 +11,9 @@ pub struct CompileOutput {
 
 #[must_use]
 pub fn compile(source: &str) -> CompileOutput {
-    let tokens = lyra_lexer::tokenize(source);
-    let (module, diagnostics) = lyra_parser::parse(&tokens);
+    let lexed = lyra_lexer::tokenize(source);
+    let (module, mut diagnostics) = lyra_parser::parse(&lexed.tokens);
+    diagnostics.splice(0..0, lexed.diagnostics);
     CompileOutput {
         module,
         diagnostics,
