@@ -241,7 +241,11 @@ mod tests {
     #[test]
     fn reports_unknown_identifier() {
         let analysis = analyze_source("fn main() { return speed; }");
-        assert!(analysis.diagnostics[0].message.contains("unknown identifier"));
+        assert!(
+            analysis.diagnostics[0]
+                .message
+                .contains("unknown identifier")
+        );
     }
 
     #[test]
@@ -304,6 +308,10 @@ mod tests {
             "fn first() { let speed = 65; return speed; } fn second() { return speed; }",
         );
         assert_eq!(analysis.diagnostics.len(), 1);
-        assert!(analysis.diagnostics[0].message.contains("unknown identifier"));
+        assert!(
+            analysis.diagnostics[0]
+                .message
+                .contains("unknown identifier")
+        );
     }
 }
