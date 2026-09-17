@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = []
+members = [
+    "crates/lyra-span",
+    "crates/lyra-diagnostics",
+    "crates/lyra-lexer",
+    "crates/lyra-ast",
+    "crates/lyra-parser",
+    "crates/lyra-driver",
+    "tools/lyra",
+]
 
 [workspace.package]
 edition = "2024"

@@ -10,13 +10,13 @@
 
 Lyra is an independent programming-language engineering project by **Kayvon Harris**. The project is being developed as a modern systems language with an emphasis on readable code, strong engineering foundations, performance, safety, and a productive developer experience.
 
-The repository is currently in **early development**. The infrastructure is being established first so future compiler and language work can be developed through a consistent, tested, reviewable workflow.
+The repository is currently in **early development**. The initial Rust compiler workspace and frontend scaffolding are now being established through a consistent, tested, reviewable workflow.
 
 ## Project Status
 
 **Early development / repository foundation**
 
-The clean Lyra repository is intentionally starting with its engineering infrastructure before implementation is migrated or rebuilt. Features should not be considered stable or production-ready at this stage.
+The clean Lyra repository began with engineering infrastructure and now contains the first v0.1 compiler/frontend scaffold. The lexer and parser remain intentionally minimal; planned capabilities should not be considered implemented, stable, or production-ready.
 
 The previous experimental implementation is preserved separately in the [Lyra-Legacy](https://github.com/KayvonHarris/Lyra-Legacy) repository for historical reference.
 
@@ -52,24 +52,32 @@ main
 
 ## Repository Structure
 
-The repository will grow as implementation work is introduced. The current foundation includes:
+The current foundation includes the repository engineering layer plus the first deliberately small compiler workspace:
 
 ```text
 Lyra/
 ├── .github/
-│   ├── workflows/
-│   │   └── ci.yml
-│   ├── dependabot.yml
-│   └── pull_request_template.md
-├── .gitignore
+├── crates/
+│   ├── lyra-span/
+│   ├── lyra-diagnostics/
+│   ├── lyra-lexer/
+│   ├── lyra-ast/
+│   ├── lyra-parser/
+│   └── lyra-driver/
+├── tools/
+│   └── lyra/
+├── docs/
+│   ├── architecture/
+│   ├── rfcs/
+│   └── vision/
+├── examples/
+├── tests/
+├── benchmarks/
 ├── Cargo.toml
-├── CONTRIBUTING.md
-├── LICENSE
-├── README.md
-└── rust-toolchain.toml
+└── README.md
 ```
 
-Future source-code directories will be added deliberately as the implementation develops rather than being pre-populated with unused scaffolding.
+Scaffolding is added only when it establishes a real architectural boundary or near-term implementation target.
 
 ## Development Environment
 
@@ -116,7 +124,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 
 ## Roadmap
 
-Detailed language and compiler milestones will be documented separately as the implementation plan is finalized. This README intentionally avoids presenting planned capabilities as completed features.
+The evolving roadmap is documented in `docs/vision/roadmap.md`. Architecture notes and draft RFCs preserve design direction for Lyra IR, LLVM/MLIR, execution engines, self-hosting, and the package/build system.
+
+These documents deliberately distinguish implemented scaffolding from planned or research-stage capabilities.
 
 ## License
 
