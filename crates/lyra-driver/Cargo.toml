@@ -9,3 +9,4 @@ lyra-ast = { path = "../lyra-ast" }
 lyra-diagnostics = { path = "../lyra-diagnostics" }
 lyra-lexer = { path = "../lyra-lexer" }
 lyra-parser = { path = "../lyra-parser" }
+lyra-semantics = { path = "../lyra-semantics" }
