@@ -6,5 +6,9 @@ license.workspace = true
 
 [dependencies]
 lyra-ast = { path = "../lyra-ast" }
-lyra-semantics = { path = "../lyra-semantics" }
 lyra-span = { path = "../lyra-span" }
+
+[dev-dependencies]
+lyra-lexer = { path = "../lyra-lexer" }
+lyra-parser = { path = "../lyra-parser" }
+lyra-semantics = { path = "../lyra-semantics" }
