@@ -1,0 +1,10 @@
+[package]
+name = "lyra-semantics"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lyra-ast = { path = "../lyra-ast" }
+lyra-diagnostics = { path = "../lyra-diagnostics" }
+lyra-span = { path = "../lyra-span" }
