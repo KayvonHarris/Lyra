@@ -99,23 +99,26 @@ fn parses_bare_return() {
 #[test]
 fn reports_missing_closing_parenthesis() {
     let (_, diagnostics) = parse_source("fn main() { return (1 + 2; }");
-    assert!(diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.message.contains("`)`")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("`)`"))
+    );
 }
 
 #[test]
 fn reports_missing_function_body() {
     let (_, diagnostics) = parse_source("fn main()");
-    assert!(diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.message.contains("`{`")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("`{`"))
+    );
 }
 
 #[test]
 fn parses_multiple_functions() {
-    let (module, diagnostics) =
-        parse_source("fn first() { return 1; } fn second() { return 2; }");
+    let (module, diagnostics) = parse_source("fn first() { return 1; } fn second() { return 2; }");
     assert!(diagnostics.is_empty());
     assert_eq!(module.items.len(), 2);
 }
