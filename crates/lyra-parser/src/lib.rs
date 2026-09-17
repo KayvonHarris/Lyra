@@ -53,8 +53,14 @@ impl<'a> Parser<'a> {
     fn parse_function(&mut self) -> Option<Function> {
         let start = self.previous().span.start;
         let name = self.expect_identifier("expected function name after `fn`")?;
-        self.expect(|kind| matches!(kind, TokenKind::LParen), "expected `(` after function name")?;
-        self.expect(|kind| matches!(kind, TokenKind::RParen), "expected `)` after function parameters")?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::LParen),
+            "expected `(` after function name",
+        )?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::RParen),
+            "expected `)` after function parameters",
+        )?;
         let body = self.parse_block()?;
         let span = Span::new(start, body.span.end);
 
@@ -62,7 +68,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> Option<Block> {
-        let open = self.expect(|kind| matches!(kind, TokenKind::LBrace), "expected `{` to start block")?;
+        let open = self.expect(
+            |kind| matches!(kind, TokenKind::LBrace),
+            "expected `{` to start block",
+        )?;
         let mut statements = Vec::new();
 
         while !self.check(|kind| matches!(kind, TokenKind::RBrace)) && !self.at_end() {
@@ -73,7 +82,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let close = self.expect(|kind| matches!(kind, TokenKind::RBrace), "expected `}` to close block")?;
+        let close = self.expect(
+            |kind| matches!(kind, TokenKind::RBrace),
+            "expected `}` to close block",
+        )?;
         Some(Block {
             statements,
             span: Span::new(open.span.start, close.span.end),
