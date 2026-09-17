@@ -221,8 +221,8 @@ impl<'a> Lexer<'a> {
             self.advance();
         }
 
-        let is_float = self.peek() == Some('.')
-            && self.peek_next().is_some_and(|c| c.is_ascii_digit());
+        let is_float =
+            self.peek() == Some('.') && self.peek_next().is_some_and(|c| c.is_ascii_digit());
 
         if is_float {
             self.advance();
@@ -363,7 +363,11 @@ mod tests {
     use super::*;
 
     fn kinds(source: &str) -> Vec<TokenKind> {
-        tokenize(source).tokens.into_iter().map(|t| t.kind).collect()
+        tokenize(source)
+            .tokens
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
     }
 
     #[test]
@@ -417,7 +421,10 @@ mod tests {
     fn lexes_string_escapes() {
         assert_eq!(
             kinds("\"Lyra\\nedge\\t\\\"AI\\\"\\\\\""),
-            vec![TokenKind::String("Lyra\nedge\t\"AI\"\\".into()), TokenKind::Eof]
+            vec![
+                TokenKind::String("Lyra\nedge\t\"AI\"\\".into()),
+                TokenKind::Eof
+            ]
         );
     }
 
@@ -425,7 +432,11 @@ mod tests {
     fn lexes_numeric_separators() {
         assert_eq!(
             kinds("1_000 65.5_0"),
-            vec![TokenKind::Integer(1000), TokenKind::Float(65.50), TokenKind::Eof]
+            vec![
+                TokenKind::Integer(1000),
+                TokenKind::Float(65.50),
+                TokenKind::Eof
+            ]
         );
     }
 
