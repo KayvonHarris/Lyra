@@ -48,7 +48,11 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             body.push_str("  ret i64 0\n");
         }
 
-        let return_type = if function.name == "main" { "i32" } else { "i64" };
+        let return_type = if function.name == "main" {
+            "i32"
+        } else {
+            "i64"
+        };
         let body = if function.name == "main" {
             normalize_main_returns(&body)
         } else {
