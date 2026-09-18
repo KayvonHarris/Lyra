@@ -199,7 +199,8 @@ mod tests {
         let llvm = emit_llvm_ir(&module).expect("comparison should lower");
         assert!(llvm.contains("icmp sgt i64 42, 7"));
         assert!(llvm.contains("zext i1 %1 to i64"));
-        assert!(llvm.contains("ret i64 %2"));
+        assert!(llvm.contains("trunc i64 %2 to i32"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
     }
 
     #[test]
