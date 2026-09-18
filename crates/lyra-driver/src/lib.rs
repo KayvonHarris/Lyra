@@ -10,6 +10,12 @@ pub struct CompileOutput {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Debug)]
+pub enum BackendError {
+    Frontend(Vec<Diagnostic>),
+    Codegen(lyra_codegen_llvm::CodegenError),
+}
+
 #[must_use]
 pub fn compile(source: &str) -> CompileOutput {
     let lexed = lyra_lexer::tokenize(source);
@@ -35,6 +41,18 @@ pub fn compile(source: &str) -> CompileOutput {
     }
 }
 
+pub fn compile_to_llvm(source: &str) -> Result<String, BackendError> {
+    let output = compile(source);
+    if !output.diagnostics.is_empty() {
+        return Err(BackendError::Frontend(output.diagnostics));
+    }
+
+    let ir = output
+        .ir
+        .expect("validated compilation must produce Lyra IR");
+    lyra_codegen_llvm::emit_llvm_ir(&ir).map_err(BackendError::Codegen)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,6 +74,14 @@ mod tests {
         let output = compile("fn main() { let speed = 65.0; return speed >= 60; }");
         assert!(output.diagnostics.is_empty());
         assert!(output.ir.is_some());
+    }
+
+    #[test]
+    fn emits_llvm_for_integer_program() {
+        let llvm = compile_to_llvm("fn main() { return 40 + 2; }")
+            .expect("valid integer program should lower to LLVM IR");
+        assert!(llvm.contains("add i64 40, 2"));
+        assert!(llvm.contains("ret i64 %1"));
     }
 
     #[test]
