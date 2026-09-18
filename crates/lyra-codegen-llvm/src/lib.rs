@@ -86,15 +86,23 @@ impl FunctionEmitter {
                 let left = self.emit_value(left, body)?;
                 let right = self.emit_value(right, body)?;
                 let register = self.register();
-                let opcode = match operator {
-                    BinaryOperator::Add => "add",
-                    BinaryOperator::Subtract => "sub",
-                    BinaryOperator::Multiply => "mul",
-                    BinaryOperator::Divide => "sdiv",
-                    BinaryOperator::Remainder => "srem",
-                    _ => return Err(CodegenError::Unsupported("binary operator")),
+                let expression = match operator {
+                    BinaryOperator::Add => format!("add i64 {left}, {right}"),
+                    BinaryOperator::Subtract => format!("sub i64 {left}, {right}"),
+                    BinaryOperator::Multiply => format!("mul i64 {left}, {right}"),
+                    BinaryOperator::Divide => format!("sdiv i64 {left}, {right}"),
+                    BinaryOperator::Remainder => format!("srem i64 {left}, {right}"),
+                    BinaryOperator::Equal => format!("icmp eq i64 {left}, {right}"),
+                    BinaryOperator::NotEqual => format!("icmp ne i64 {left}, {right}"),
+                    BinaryOperator::Less => format!("icmp slt i64 {left}, {right}"),
+                    BinaryOperator::LessEqual => format!("icmp sle i64 {left}, {right}"),
+                    BinaryOperator::Greater => format!("icmp sgt i64 {left}, {right}"),
+                    BinaryOperator::GreaterEqual => format!("icmp sge i64 {left}, {right}"),
+                    BinaryOperator::And | BinaryOperator::Or => {
+                        return Err(CodegenError::Unsupported("logical binary operator"));
+                    }
                 };
-                body.push_str(&format!("  {register} = {opcode} i64 {left}, {right}\n"));
+                body.push_str(&format!("  {register} = {expression}\n"));
                 Ok(register)
             }
             Value::Float(_, _) => Err(CodegenError::Unsupported("float values")),
@@ -108,6 +116,31 @@ mod tests {
     use super::*;
     use lyra_ir::{Block, Function};
     use lyra_span::Span;
+
+    #[test]
+    fn emits_integer_comparison() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                body: Block {
+                    instructions: vec![Instruction::Return {
+                        value: Some(Value::Binary {
+                            left: Box::new(Value::Integer(42, span)),
+                            operator: BinaryOperator::Greater,
+                            right: Box::new(Value::Integer(7, span)),
+                            span,
+                        }),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("comparison should lower");
+        assert!(llvm.contains("icmp sgt i64 42, 7"));
+    }
 
     #[test]
     fn emits_integer_main_function() {
