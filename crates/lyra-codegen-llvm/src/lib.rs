@@ -57,7 +57,6 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
     Ok(output)
 }
 
-
 fn normalize_main_returns(body: &str) -> String {
     let mut output = String::new();
     for line in body.lines() {
