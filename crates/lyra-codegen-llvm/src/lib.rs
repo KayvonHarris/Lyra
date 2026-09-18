@@ -85,25 +85,41 @@ impl FunctionEmitter {
             Value::Binary { left, operator, right, .. } => {
                 let left = self.emit_value(left, body)?;
                 let right = self.emit_value(right, body)?;
-                let register = self.register();
-                let expression = match operator {
-                    BinaryOperator::Add => format!("add i64 {left}, {right}"),
-                    BinaryOperator::Subtract => format!("sub i64 {left}, {right}"),
-                    BinaryOperator::Multiply => format!("mul i64 {left}, {right}"),
-                    BinaryOperator::Divide => format!("sdiv i64 {left}, {right}"),
-                    BinaryOperator::Remainder => format!("srem i64 {left}, {right}"),
-                    BinaryOperator::Equal => format!("icmp eq i64 {left}, {right}"),
-                    BinaryOperator::NotEqual => format!("icmp ne i64 {left}, {right}"),
-                    BinaryOperator::Less => format!("icmp slt i64 {left}, {right}"),
-                    BinaryOperator::LessEqual => format!("icmp sle i64 {left}, {right}"),
-                    BinaryOperator::Greater => format!("icmp sgt i64 {left}, {right}"),
-                    BinaryOperator::GreaterEqual => format!("icmp sge i64 {left}, {right}"),
+                let arithmetic = match operator {
+                    BinaryOperator::Add => Some("add"),
+                    BinaryOperator::Subtract => Some("sub"),
+                    BinaryOperator::Multiply => Some("mul"),
+                    BinaryOperator::Divide => Some("sdiv"),
+                    BinaryOperator::Remainder => Some("srem"),
+                    _ => None,
+                };
+
+                if let Some(opcode) = arithmetic {
+                    let register = self.register();
+                    body.push_str(&format!("  {register} = {opcode} i64 {left}, {right}\n"));
+                    return Ok(register);
+                }
+
+                let predicate = match operator {
+                    BinaryOperator::Equal => "eq",
+                    BinaryOperator::NotEqual => "ne",
+                    BinaryOperator::Less => "slt",
+                    BinaryOperator::LessEqual => "sle",
+                    BinaryOperator::Greater => "sgt",
+                    BinaryOperator::GreaterEqual => "sge",
                     BinaryOperator::And | BinaryOperator::Or => {
                         return Err(CodegenError::Unsupported("logical binary operator"));
                     }
+                    _ => unreachable!("arithmetic operators returned above"),
                 };
-                body.push_str(&format!("  {register} = {expression}\n"));
-                Ok(register)
+
+                let comparison = self.register();
+                body.push_str(&format!(
+                    "  {comparison} = icmp {predicate} i64 {left}, {right}\n"
+                ));
+                let result = self.register();
+                body.push_str(&format!("  {result} = zext i1 {comparison} to i64\n"));
+                Ok(result)
             }
             Value::Float(_, _) => Err(CodegenError::Unsupported("float values")),
             Value::String(_, _) => Err(CodegenError::Unsupported("string values")),
@@ -140,6 +156,8 @@ mod tests {
 
         let llvm = emit_llvm_ir(&module).expect("comparison should lower");
         assert!(llvm.contains("icmp sgt i64 42, 7"));
+        assert!(llvm.contains("zext i1 %1 to i64"));
+        assert!(llvm.contains("ret i64 %2"));
     }
 
     #[test]
