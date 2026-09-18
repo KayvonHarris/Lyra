@@ -189,8 +189,7 @@ mod tests {
     fn lowers_binary_expression_tree() {
         let module = lower_source("fn main() { return 60 + 5 * 2; }");
         let Instruction::Return {
-            value: Some(value),
-            ..
+            value: Some(value), ..
         } = &module.functions[0].body.instructions[0]
         else {
             panic!("expected return instruction");
