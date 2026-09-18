@@ -4,7 +4,6 @@
 //! LLVM IR. It preserves Lyra semantics without coupling the language to a
 //! particular code-generation framework.
 
-use lyra_ast::{BinaryOperator, UnaryOperator};
 use lyra_span::Span;
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -39,6 +38,29 @@ pub enum Instruction {
         value: Option<Value>,
         span: Span,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOperator {
+    Negate,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,7 +156,7 @@ fn lower_expression(expression: &lyra_ast::Expression) -> Value {
             operand,
             span,
         } => Value::Unary {
-            operator: *operator,
+            operator: lower_unary_operator(*operator),
             operand: Box::new(lower_expression(operand)),
             span: *span,
         },
@@ -145,10 +167,35 @@ fn lower_expression(expression: &lyra_ast::Expression) -> Value {
             span,
         } => Value::Binary {
             left: Box::new(lower_expression(left)),
-            operator: *operator,
+            operator: lower_binary_operator(*operator),
             right: Box::new(lower_expression(right)),
             span: *span,
         },
+    }
+}
+
+fn lower_unary_operator(operator: lyra_ast::UnaryOperator) -> UnaryOperator {
+    match operator {
+        lyra_ast::UnaryOperator::Negate => UnaryOperator::Negate,
+        lyra_ast::UnaryOperator::Not => UnaryOperator::Not,
+    }
+}
+
+fn lower_binary_operator(operator: lyra_ast::BinaryOperator) -> BinaryOperator {
+    match operator {
+        lyra_ast::BinaryOperator::Add => BinaryOperator::Add,
+        lyra_ast::BinaryOperator::Subtract => BinaryOperator::Subtract,
+        lyra_ast::BinaryOperator::Multiply => BinaryOperator::Multiply,
+        lyra_ast::BinaryOperator::Divide => BinaryOperator::Divide,
+        lyra_ast::BinaryOperator::Remainder => BinaryOperator::Remainder,
+        lyra_ast::BinaryOperator::Equal => BinaryOperator::Equal,
+        lyra_ast::BinaryOperator::NotEqual => BinaryOperator::NotEqual,
+        lyra_ast::BinaryOperator::Less => BinaryOperator::Less,
+        lyra_ast::BinaryOperator::LessEqual => BinaryOperator::LessEqual,
+        lyra_ast::BinaryOperator::Greater => BinaryOperator::Greater,
+        lyra_ast::BinaryOperator::GreaterEqual => BinaryOperator::GreaterEqual,
+        lyra_ast::BinaryOperator::And => BinaryOperator::And,
+        lyra_ast::BinaryOperator::Or => BinaryOperator::Or,
     }
 }
 
