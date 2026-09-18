@@ -265,12 +265,11 @@ mod tests {
     #[test]
     fn reports_duplicate_function() {
         let analysis = analyze_source("fn main() {} fn main() {}");
-        assert!(
-            analysis
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("function `main` is already defined"))
-        );
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("function `main` is already defined")
+        }));
     }
 
     #[test]
