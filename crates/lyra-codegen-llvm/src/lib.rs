@@ -57,6 +57,25 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
     Ok(output)
 }
 
+
+fn normalize_main_returns(body: &str) -> String {
+    let mut output = String::new();
+    for line in body.lines() {
+        if let Some(value) = line.trim().strip_prefix("ret i64 ") {
+            if let Ok(value) = value.parse::<i64>() {
+                output.push_str(&format!("  ret i32 {}\n", value as i32));
+            } else {
+                output.push_str(&format!("  %lyra.main.exit = trunc i64 {value} to i32\n"));
+                output.push_str("  ret i32 %lyra.main.exit\n");
+            }
+        } else {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output
+}
+
 #[derive(Default)]
 struct FunctionEmitter {
     next_register: usize,
@@ -195,8 +214,9 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("LLVM IR emission should succeed");
-        assert!(llvm.contains("define i64 @main()"));
+        assert!(llvm.contains("define i32 @main()"));
         assert!(llvm.contains("add i64 40, 2"));
-        assert!(llvm.contains("ret i64 %1"));
+        assert!(llvm.contains("trunc i64 %1 to i32"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
     }
 }
