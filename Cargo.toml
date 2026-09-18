@@ -7,6 +7,7 @@ members = [
     "crates/lyra-ast",
     "crates/lyra-parser",
     "crates/lyra-semantics",
+    "crates/lyra-ir",
     "crates/lyra-driver",
     "tools/lyra",
 ]

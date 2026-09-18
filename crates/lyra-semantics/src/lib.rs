@@ -1,6 +1,6 @@
 //! Semantic analysis for Lyra.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use lyra_ast::{BinaryOperator, Expression, Item, Module, Statement, UnaryOperator};
 use lyra_diagnostics::{Diagnostic, Severity};
@@ -34,6 +34,20 @@ struct Analyzer {
 
 impl Analyzer {
     fn analyze(mut self, module: &Module) -> Analysis {
+        let mut functions = HashSet::new();
+
+        for item in &module.items {
+            match item {
+                Item::Function(function) if !functions.insert(function.name.clone()) => {
+                    self.error(
+                        format!("function `{}` is already defined", function.name),
+                        function.span,
+                    );
+                }
+                Item::Function(_) => {}
+            }
+        }
+
         for item in &module.items {
             match item {
                 Item::Function(function) => {
@@ -246,6 +260,16 @@ mod tests {
                 .message
                 .contains("unknown identifier")
         );
+    }
+
+    #[test]
+    fn reports_duplicate_function() {
+        let analysis = analyze_source("fn main() {} fn main() {}");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("function `main` is already defined")
+        }));
     }
 
     #[test]
