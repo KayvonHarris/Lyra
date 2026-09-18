@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 lyra-ir = { path = "../lyra-ir" }
+
+[dev-dependencies]
+lyra-span = { path = "../lyra-span" }
