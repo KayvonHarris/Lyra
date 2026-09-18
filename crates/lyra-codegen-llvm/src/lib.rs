@@ -41,11 +41,17 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             }
         }
 
-        if !body.lines().any(|line| line.trim_start().starts_with("ret ")) {
+        if !body
+            .lines()
+            .any(|line| line.trim_start().starts_with("ret "))
+        {
             body.push_str("  ret i64 0\n");
         }
 
-        output.push_str(&format!("define i64 @{}() {{\nentry:\n{body}}}\n\n", function.name));
+        output.push_str(&format!(
+            "define i64 @{}() {{\nentry:\n{body}}}\n\n",
+            function.name
+        ));
     }
 
     Ok(output)
@@ -72,7 +78,9 @@ impl FunctionEmitter {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| CodegenError::UnknownLocal(name.clone())),
-            Value::Unary { operator, operand, .. } => {
+            Value::Unary {
+                operator, operand, ..
+            } => {
                 let operand = self.emit_value(operand, body)?;
                 let register = self.register();
                 let expression = match operator {
@@ -82,7 +90,12 @@ impl FunctionEmitter {
                 body.push_str(&format!("  {register} = {expression}\n"));
                 Ok(register)
             }
-            Value::Binary { left, operator, right, .. } => {
+            Value::Binary {
+                left,
+                operator,
+                right,
+                ..
+            } => {
                 let left = self.emit_value(left, body)?;
                 let right = self.emit_value(right, body)?;
                 let arithmetic = match operator {
