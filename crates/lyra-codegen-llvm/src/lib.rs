@@ -184,22 +184,23 @@ mod tests {
 
     #[test]
     fn stops_emitting_after_return() {
+        let span = Span { start: 0, end: 0 };
         let module = Module {
             functions: vec![Function {
                 name: "main".into(),
                 body: Block {
                     instructions: vec![
                         Instruction::Return {
-                            value: Some(Value::Integer(7, span())),
-                            span: span(),
+                            value: Some(Value::Integer(7, span)),
+                            span: span,
                         },
                         Instruction::Evaluate {
-                            value: Value::Integer(99, span()),
-                            span: span(),
+                            value: Value::Integer(99, span),
+                            span: span,
                         },
                     ],
                 },
-                span: span(),
+                span: span,
             }],
         };
 
