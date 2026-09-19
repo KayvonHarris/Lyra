@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use lyra_ast::{BinaryOperator, Expression, Item, Module, Statement, UnaryOperator};
+use lyra_ast::{BinaryOperator, Expression, Item, Module, Statement, TypeName, UnaryOperator};
 use lyra_diagnostics::{Diagnostic, Severity};
 use lyra_span::Span;
 
@@ -26,11 +26,18 @@ pub fn analyze(module: &Module) -> Analysis {
     Analyzer::default().analyze(module)
 }
 
+#[derive(Debug, Clone)]
+struct FunctionSignature {
+    parameters: Vec<Type>,
+    return_type: Type,
+}
+
 #[derive(Default)]
 struct Analyzer {
     diagnostics: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, Type>>,
-    functions: HashMap<String, usize>,
+    functions: HashMap<String, FunctionSignature>,
+    current_return_type: Type,
 }
 
 impl Analyzer {
@@ -47,7 +54,25 @@ impl Analyzer {
                 }
                 Item::Function(function) => {
                     self.functions
-                        .insert(function.name.clone(), function.parameters.len());
+.insert(
+                            function.name.clone(),
+                            FunctionSignature {
+                                parameters: function
+                                    .parameters
+                                    .iter()
+                                    .map(|parameter| {
+                                        parameter
+                                            .type_name
+                                            .as_ref()
+                                            .map_or(Type::Integer, Self::type_from_name)
+                                    })
+                                    .collect(),
+                                return_type: function
+                                    .return_type
+                                    .as_ref()
+                                    .map_or(Type::Integer, Self::type_from_name),
+                            },
+                        );
                 }
             }
         }
@@ -55,6 +80,10 @@ impl Analyzer {
         for item in &module.items {
             match item {
                 Item::Function(function) => {
+                    self.current_return_type = function
+                        .return_type
+                        .as_ref()
+                        .map_or(Type::Integer, Self::type_from_name);
                     self.push_scope();
                     for parameter in &function.parameters {
                         let duplicate = self
@@ -70,7 +99,11 @@ impl Analyzer {
                                 parameter.span,
                             );
                         } else if let Some(scope) = self.scopes.last_mut() {
-                            scope.insert(parameter.name.clone(), Type::Integer);
+                            let ty = parameter
+                                .type_name
+                                .as_ref()
+                                .map_or(Type::Integer, Self::type_from_name);
+                            scope.insert(parameter.name.clone(), ty);
                         }
                     }
                     for statement in &function.body.statements {
@@ -108,9 +141,18 @@ impl Analyzer {
                     self.error("internal semantic error: no active scope", *span);
                 }
             }
-            Statement::Return { value, .. } => {
-                if let Some(value) = value {
-                    self.check_expression(value);
+            Statement::Return { value, span } => {
+                let actual = value
+                    .as_ref()
+                    .map_or(Type::Unit, |value| self.check_expression(value));
+                if actual != Type::Unknown && actual != self.current_return_type {
+                    self.error(
+                        format!(
+                            "return type mismatch: expected {:?} but found {:?}",
+                            self.current_return_type, actual
+                        ),
+                        *span,
+                    );
                 }
             }
             Statement::Expression { expression, .. } => {
@@ -131,15 +173,38 @@ impl Analyzer {
                 arguments,
                 span,
             } => {
-                for argument in arguments {
-                    self.check_expression(argument);
-                }
-                match self.functions.get(callee).copied() {
-                    Some(expected) if expected == arguments.len() => Type::Integer,
-                    Some(expected) => {
+                let argument_types = arguments
+                    .iter()
+                    .map(|argument| self.check_expression(argument))
+                    .collect::<Vec<_>>();
+                match self.functions.get(callee).cloned() {
+                    Some(signature) if signature.parameters.len() == arguments.len() => {
+                        let mut valid = true;
+                        for (index, (actual, expected)) in argument_types
+                            .iter()
+                            .zip(&signature.parameters)
+                            .enumerate()
+                        {
+                            if *actual != Type::Unknown && actual != expected {
+                                self.error(
+                                    format!(
+                                        "argument {} to `{callee}` expects {:?} but found {:?}",
+                                        index + 1,
+                                        expected,
+                                        actual
+                                    ),
+                                    arguments[index].span(),
+                                );
+                                valid = false;
+                            }
+                        }
+                        if valid { signature.return_type } else { Type::Unknown }
+                    }
+                    Some(signature) => {
                         self.error(
                             format!(
-                                "function `{callee}` expects {expected} arguments but received {}",
+                                "function `{callee}` expects {} arguments but received {}",
+                                signature.parameters.len(),
                                 arguments.len()
                             ),
                             *span,
@@ -249,6 +314,17 @@ impl Analyzer {
         }
     }
 
+    fn type_from_name(type_name: &TypeName) -> Type {
+        match type_name.name.as_str() {
+            "Int" => Type::Integer,
+            "Float" => Type::Float,
+            "String" => Type::String,
+            "Bool" => Type::Boolean,
+            "Unit" => Type::Unit,
+            _ => Type::Unknown,
+        }
+    }
+
     fn numeric_pair(left: Type, right: Type) -> bool {
         matches!(left, Type::Integer | Type::Float) && matches!(right, Type::Integer | Type::Float)
     }
@@ -304,6 +380,32 @@ mod tests {
         let analysis =
             analyze_source("fn add(a, b) { return a + b; } fn main() { return add(20, 22); }");
         assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_typed_function_call() {
+        let analysis = analyze_source(
+            "fn add(a: Int, b: Int) -> Int { return a + b; } fn main() -> Int { return add(20, 22); }",
+        );
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_typed_argument_mismatch() {
+        let analysis = analyze_source(
+            "fn add(a: Int, b: Int) -> Int { return a + b; } fn main() -> Int { return add(true, 22); }",
+        );
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("argument 1") && diagnostic.message.contains("Integer")
+        }));
+    }
+
+    #[test]
+    fn rejects_typed_return_mismatch() {
+        let analysis = analyze_source("fn answer() -> Bool { return 42; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("return type mismatch")
+        }));
     }
 
     #[test]
