@@ -21,7 +21,12 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         let mut emitter = FunctionEmitter::default();
         let mut body = String::new();
 
+        let mut terminated = false;
         for instruction in &function.body.instructions {
+            if terminated {
+                break;
+            }
+
             match instruction {
                 Instruction::Bind { name, value, .. } => {
                     let operand = emitter.emit_value(value, &mut body)?;
@@ -37,11 +42,12 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                     } else {
                         body.push_str("  ret i64 0\n");
                     }
+                    terminated = true;
                 }
             }
         }
 
-        if !body
+        if !terminated && !body
             .lines()
             .any(|line| line.trim_start().starts_with("ret "))
         {
@@ -174,6 +180,32 @@ mod tests {
     use super::*;
     use lyra_ir::{Block, Function};
     use lyra_span::Span;
+
+    #[test]
+    fn stops_emitting_after_return() {
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                body: Block {
+                    instructions: vec![
+                        Instruction::Return {
+                            value: Some(Value::Integer(7, span())),
+                            span: span(),
+                        },
+                        Instruction::Evaluate {
+                            value: Value::Integer(99, span()),
+                            span: span(),
+                        },
+                    ],
+                },
+                span: span(),
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("codegen should succeed");
+        assert!(llvm.contains("ret i32 7"));
+        assert!(!llvm.contains("99"));
+    }
 
     #[test]
     fn emits_integer_comparison() {
