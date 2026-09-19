@@ -11,6 +11,14 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
+    if first == "run" {
+        let Some(path) = args.next() else {
+            eprintln!("usage: lyra run <file.ly>");
+            return ExitCode::from(2);
+        };
+        return run_native(&path);
+    }
+
     if first == "build" {
         let Some(path) = args.next() else {
             eprintln!("usage: lyra build <file.ly> [-o output]");
@@ -103,6 +111,44 @@ fn build_native(path: &str, output: &Path) -> ExitCode {
     }
 }
 
+fn run_native(path: &str) -> ExitCode {
+    let mut output = env::temp_dir();
+    let stem = Path::new(path)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("lyra-program");
+    output.push(format!("{stem}-{}", std::process::id()));
+
+    let build_status = build_native(path, &output);
+    if build_status != ExitCode::SUCCESS {
+        return build_status;
+    }
+
+    let status = Command::new(&output).status();
+    let _ = fs::remove_file(&output);
+
+    match status {
+        Ok(status) => match status.code() {
+            Some(code) => {
+                println!("Program exited with code {code}");
+                if code == 0 {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(u8::try_from(code).unwrap_or(1))
+                }
+            }
+            None => {
+                eprintln!("lyra: program terminated by signal");
+                ExitCode::FAILURE
+            }
+        },
+        Err(error) => {
+            eprintln!("lyra: could not run {}: {error}", output.display());
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn read_source(path: &str) -> Result<String, ExitCode> {
     fs::read_to_string(path).map_err(|error| {
         eprintln!("lyra: could not read {path}: {error}");
@@ -130,4 +176,5 @@ fn print_usage() {
     eprintln!("usage: lyra <file.ly>");
     eprintln!("       lyra --emit-llvm <file.ly>");
     eprintln!("       lyra build <file.ly> [-o output]");
+    eprintln!("       lyra run <file.ly>");
 }
