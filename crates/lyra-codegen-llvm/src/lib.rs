@@ -20,6 +20,17 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
     for function in &module.functions {
         let mut emitter = FunctionEmitter::default();
         let mut body = String::new();
+        let parameters = function
+            .parameters
+            .iter()
+            .map(|parameter| format!("i64 %{}", parameter.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for parameter in &function.parameters {
+            emitter
+                .locals
+                .insert(parameter.name.clone(), format!("%{}", parameter.name));
+        }
 
         let mut terminated = false;
         for instruction in &function.body.instructions {
@@ -67,7 +78,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         };
 
         output.push_str(&format!(
-            "define {return_type} @{}() {{\nentry:\n{body}}}\n\n",
+            "define {return_type} @{}({parameters}) {{\nentry:\n{body}}}\n\n",
             function.name
         ));
     }
@@ -114,6 +125,21 @@ impl FunctionEmitter {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| CodegenError::UnknownLocal(name.clone())),
+            Value::Call {
+                callee, arguments, ..
+            } => {
+                let mut operands = Vec::with_capacity(arguments.len());
+                for argument in arguments {
+                    let operand = self.emit_value(argument, body)?;
+                    operands.push(format!("i64 {operand}"));
+                }
+                let register = self.register();
+                body.push_str(&format!(
+                    "  {register} = call i64 @{callee}({})\n",
+                    operands.join(", ")
+                ));
+                Ok(register)
+            }
             Value::Unary {
                 operator, operand, ..
             } => {
@@ -188,6 +214,7 @@ mod tests {
         let module = Module {
             functions: vec![Function {
                 name: "main".into(),
+                parameters: vec![],
                 body: Block {
                     instructions: vec![
                         Instruction::Return {
@@ -215,6 +242,7 @@ mod tests {
         let module = Module {
             functions: vec![Function {
                 name: "main".into(),
+                parameters: vec![],
                 body: Block {
                     instructions: vec![Instruction::Return {
                         value: Some(Value::Binary {
@@ -238,11 +266,67 @@ mod tests {
     }
 
     #[test]
+    fn emits_function_parameters_and_call() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![
+                Function {
+                    name: "add".into(),
+                    parameters: vec![
+                        lyra_ir::Parameter {
+                            name: "a".into(),
+                            span,
+                        },
+                        lyra_ir::Parameter {
+                            name: "b".into(),
+                            span,
+                        },
+                    ],
+                    body: Block {
+                        instructions: vec![Instruction::Return {
+                            value: Some(Value::Binary {
+                                left: Box::new(Value::Local("a".into(), span)),
+                                operator: BinaryOperator::Add,
+                                right: Box::new(Value::Local("b".into(), span)),
+                                span,
+                            }),
+                            span,
+                        }],
+                    },
+                    span,
+                },
+                Function {
+                    name: "main".into(),
+                    parameters: vec![],
+                    body: Block {
+                        instructions: vec![Instruction::Return {
+                            value: Some(Value::Call {
+                                callee: "add".into(),
+                                arguments: vec![Value::Integer(20, span), Value::Integer(22, span)],
+                                span,
+                            }),
+                            span,
+                        }],
+                    },
+                    span,
+                },
+            ],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("function call should lower");
+        assert!(llvm.contains("define i64 @add(i64 %a, i64 %b)"));
+        assert!(llvm.contains("add i64 %a, %b"));
+        assert!(llvm.contains("call i64 @add(i64 20, i64 22)"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
+    }
+
+    #[test]
     fn emits_integer_main_function() {
         let span = Span { start: 0, end: 0 };
         let module = Module {
             functions: vec![Function {
                 name: "main".into(),
+                parameters: vec![],
                 body: Block {
                     instructions: vec![Instruction::Return {
                         value: Some(Value::Binary {

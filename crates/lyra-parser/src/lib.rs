@@ -1,7 +1,7 @@
 //! Parser for the Lyra language.
 
 use lyra_ast::{
-    BinaryOperator, Block, Expression, Function, Item, Module, Statement, UnaryOperator,
+    BinaryOperator, Block, Expression, Function, Item, Module, Parameter, Statement, UnaryOperator,
 };
 use lyra_diagnostics::{Diagnostic, Severity};
 use lyra_lexer::{Token, TokenKind};
@@ -57,6 +57,23 @@ impl<'a> Parser<'a> {
             |kind| matches!(kind, TokenKind::LParen),
             "expected `(` after function name",
         )?;
+        let mut parameters = Vec::new();
+        if !self.check(|kind| matches!(kind, TokenKind::RParen)) {
+            loop {
+                let parameter_start = self.peek().span.start;
+                let parameter_name =
+                    self.expect_identifier("expected parameter name in function declaration")?;
+                let parameter_end = self.previous().span.end;
+                parameters.push(Parameter {
+                    name: parameter_name,
+                    span: Span::new(parameter_start, parameter_end),
+                });
+
+                if !self.matches(|kind| matches!(kind, TokenKind::Comma)) {
+                    break;
+                }
+            }
+        }
         self.expect(
             |kind| matches!(kind, TokenKind::RParen),
             "expected `)` after function parameters",
@@ -64,7 +81,12 @@ impl<'a> Parser<'a> {
         let body = self.parse_block()?;
         let span = Span::new(start, body.span.end);
 
-        Some(Function { name, body, span })
+        Some(Function {
+            name,
+            parameters,
+            body,
+            span,
+        })
     }
 
     fn parse_block(&mut self) -> Option<Block> {
@@ -209,7 +231,30 @@ impl<'a> Parser<'a> {
             TokenKind::String(value) => Some(Expression::String(value, token.span)),
             TokenKind::True => Some(Expression::Boolean(true, token.span)),
             TokenKind::False => Some(Expression::Boolean(false, token.span)),
-            TokenKind::Identifier(name) => Some(Expression::Identifier(name, token.span)),
+            TokenKind::Identifier(name) => {
+                if self.matches(|kind| matches!(kind, TokenKind::LParen)) {
+                    let mut arguments = Vec::new();
+                    if !self.check(|kind| matches!(kind, TokenKind::RParen)) {
+                        loop {
+                            arguments.push(self.parse_expression()?);
+                            if !self.matches(|kind| matches!(kind, TokenKind::Comma)) {
+                                break;
+                            }
+                        }
+                    }
+                    let close = self.expect(
+                        |kind| matches!(kind, TokenKind::RParen),
+                        "expected `)` after function arguments",
+                    )?;
+                    Some(Expression::Call {
+                        callee: name,
+                        arguments,
+                        span: Span::new(token.span.start, close.span.end),
+                    })
+                } else {
+                    Some(Expression::Identifier(name, token.span))
+                }
+            }
             TokenKind::LParen => {
                 let expression = self.parse_expression()?;
                 self.expect(
@@ -372,6 +417,26 @@ mod tests {
         let Item::Function(function) = &module.items[0];
         assert_eq!(function.name, "main");
         assert_eq!(function.body.statements.len(), 2);
+    }
+
+    #[test]
+    fn parses_function_parameters_and_call_arguments() {
+        let (module, diagnostics) =
+            parse_source("fn add(a, b) { return a + b; } fn main() { return add(20, 22); }");
+        assert!(diagnostics.is_empty());
+        let Item::Function(add) = &module.items[0];
+        assert_eq!(add.parameters.len(), 2);
+        assert_eq!(add.parameters[0].name, "a");
+        assert_eq!(add.parameters[1].name, "b");
+
+        let Item::Function(main) = &module.items[1];
+        assert!(matches!(
+            &main.body.statements[0],
+            Statement::Return {
+                value: Some(Expression::Call { callee, arguments, .. }),
+                ..
+            } if callee == "add" && arguments.len() == 2
+        ));
     }
 
     #[test]
