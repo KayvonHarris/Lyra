@@ -30,6 +30,7 @@ pub fn analyze(module: &Module) -> Analysis {
 struct Analyzer {
     diagnostics: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, Type>>,
+    functions: HashMap<String, usize>,
 }
 
 impl Analyzer {
@@ -44,7 +45,10 @@ impl Analyzer {
                         function.span,
                     );
                 }
-                Item::Function(_) => {}
+                Item::Function(function) => {
+                    self.functions
+                        .insert(function.name.clone(), function.parameters.len());
+                }
             }
         }
 
@@ -52,6 +56,23 @@ impl Analyzer {
             match item {
                 Item::Function(function) => {
                     self.push_scope();
+                    for parameter in &function.parameters {
+                        let duplicate = self
+                            .scopes
+                            .last()
+                            .is_some_and(|scope| scope.contains_key(&parameter.name));
+                        if duplicate {
+                            self.error(
+                                format!(
+                                    "parameter `{}` is already defined in this function",
+                                    parameter.name
+                                ),
+                                parameter.span,
+                            );
+                        } else if let Some(scope) = self.scopes.last_mut() {
+                            scope.insert(parameter.name.clone(), Type::Integer);
+                        }
+                    }
                     for statement in &function.body.statements {
                         self.check_statement(statement);
                     }
@@ -105,6 +126,32 @@ impl Analyzer {
             Expression::String(_, _) => Type::String,
             Expression::Boolean(_, _) => Type::Boolean,
             Expression::Identifier(name, span) => self.resolve(name, *span),
+            Expression::Call {
+                callee,
+                arguments,
+                span,
+            } => {
+                for argument in arguments {
+                    self.check_expression(argument);
+                }
+                match self.functions.get(callee).copied() {
+                    Some(expected) if expected == arguments.len() => Type::Integer,
+                    Some(expected) => {
+                        self.error(
+                            format!(
+                                "function `{callee}` expects {expected} arguments but received {}",
+                                arguments.len()
+                            ),
+                            *span,
+                        );
+                        Type::Unknown
+                    }
+                    None => {
+                        self.error(format!("unknown function `{callee}`"), *span);
+                        Type::Unknown
+                    }
+                }
+            }
             Expression::Unary {
                 operator,
                 operand,
@@ -250,6 +297,40 @@ mod tests {
     fn accepts_well_typed_program() {
         let analysis = analyze_source("fn main() { let speed = 65.0; return speed >= 60; }");
         assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_function_parameters_and_calls() {
+        let analysis =
+            analyze_source("fn add(a, b) { return a + b; } fn main() { return add(20, 22); }");
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn reports_unknown_function() {
+        let analysis = analyze_source("fn main() { return missing(42); }");
+        assert!(analysis.diagnostics[0].message.contains("unknown function"));
+    }
+
+    #[test]
+    fn reports_wrong_argument_count() {
+        let analysis =
+            analyze_source("fn add(a, b) { return a + b; } fn main() { return add(42); }");
+        assert!(
+            analysis.diagnostics[0]
+                .message
+                .contains("expects 2 arguments but received 1")
+        );
+    }
+
+    #[test]
+    fn reports_duplicate_parameter() {
+        let analysis = analyze_source("fn add(a, a) { return a; }");
+        assert!(
+            analysis.diagnostics[0]
+                .message
+                .contains("parameter `a` is already defined")
+        );
     }
 
     #[test]
