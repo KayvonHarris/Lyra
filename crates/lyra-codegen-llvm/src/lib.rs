@@ -273,8 +273,14 @@ mod tests {
                 Function {
                     name: "add".into(),
                     parameters: vec![
-                        lyra_ir::Parameter { name: "a".into(), span },
-                        lyra_ir::Parameter { name: "b".into(), span },
+                        lyra_ir::Parameter {
+                            name: "a".into(),
+                            span,
+                        },
+                        lyra_ir::Parameter {
+                            name: "b".into(),
+                            span,
+                        },
                     ],
                     body: Block {
                         instructions: vec![Instruction::Return {
