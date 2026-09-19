@@ -192,15 +192,15 @@ mod tests {
                     instructions: vec![
                         Instruction::Return {
                             value: Some(Value::Integer(7, span)),
-                            span: span,
+                            span,
                         },
                         Instruction::Evaluate {
                             value: Value::Integer(99, span),
-                            span: span,
+                            span,
                         },
                     ],
                 },
-                span: span,
+                span,
             }],
         };
 
