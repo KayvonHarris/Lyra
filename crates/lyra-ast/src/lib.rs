@@ -15,7 +15,14 @@ pub enum Item {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
+    pub parameters: Vec<Parameter>,
     pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parameter {
+    pub name: String,
     pub span: Span,
 }
 
@@ -49,6 +56,11 @@ pub enum Expression {
     String(String, Span),
     Boolean(bool, Span),
     Identifier(String, Span),
+    Call {
+        callee: String,
+        arguments: Vec<Expression>,
+        span: Span,
+    },
     Unary {
         operator: UnaryOperator,
         operand: Box<Expression>,
@@ -71,6 +83,7 @@ impl Expression {
             | Self::String(_, span)
             | Self::Boolean(_, span)
             | Self::Identifier(_, span)
+            | Self::Call { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. } => *span,
         }
