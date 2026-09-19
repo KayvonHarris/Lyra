@@ -14,7 +14,14 @@ pub struct Module {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
+    pub parameters: Vec<Parameter>,
     pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Parameter {
+    pub name: String,
     pub span: Span,
 }
 
@@ -70,6 +77,11 @@ pub enum Value {
     String(String, Span),
     Boolean(bool, Span),
     Local(String, Span),
+    Call {
+        callee: String,
+        arguments: Vec<Value>,
+        span: Span,
+    },
     Unary {
         operator: UnaryOperator,
         operand: Box<Value>,
@@ -92,6 +104,7 @@ impl Value {
             | Self::String(_, span)
             | Self::Boolean(_, span)
             | Self::Local(_, span)
+            | Self::Call { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. } => *span,
         }
@@ -114,6 +127,14 @@ pub fn lower(module: &lyra_ast::Module) -> Module {
 fn lower_function(function: &lyra_ast::Function) -> Function {
     Function {
         name: function.name.clone(),
+        parameters: function
+            .parameters
+            .iter()
+            .map(|parameter| Parameter {
+                name: parameter.name.clone(),
+                span: parameter.span,
+            })
+            .collect(),
         body: Block {
             instructions: function
                 .body
@@ -151,6 +172,15 @@ fn lower_expression(expression: &lyra_ast::Expression) -> Value {
         lyra_ast::Expression::String(value, span) => Value::String(value.clone(), *span),
         lyra_ast::Expression::Boolean(value, span) => Value::Boolean(*value, *span),
         lyra_ast::Expression::Identifier(name, span) => Value::Local(name.clone(), *span),
+        lyra_ast::Expression::Call {
+            callee,
+            arguments,
+            span,
+        } => Value::Call {
+            callee: callee.clone(),
+            arguments: arguments.iter().map(lower_expression).collect(),
+            span: *span,
+        },
         lyra_ast::Expression::Unary {
             operator,
             operand,
@@ -229,6 +259,22 @@ mod tests {
                 value: Some(Value::Local(name, _)),
                 ..
             } if name == "speed"
+        ));
+    }
+
+    #[test]
+    fn lowers_function_parameters_and_calls() {
+        let module =
+            lower_source("fn add(a, b) { return a + b; } fn main() { return add(20, 22); }");
+        assert_eq!(module.functions[0].parameters.len(), 2);
+        assert_eq!(module.functions[0].parameters[0].name, "a");
+        assert_eq!(module.functions[0].parameters[1].name, "b");
+        assert!(matches!(
+            &module.functions[1].body.instructions[0],
+            Instruction::Return {
+                value: Some(Value::Call { callee, arguments, .. }),
+                ..
+            } if callee == "add" && arguments.len() == 2
         ));
     }
 
