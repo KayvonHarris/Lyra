@@ -48,13 +48,42 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             body.push_str("  ret i64 0\n");
         }
 
+        let return_type = if function.name == "main" {
+            "i32"
+        } else {
+            "i64"
+        };
+        let body = if function.name == "main" {
+            normalize_main_returns(&body)
+        } else {
+            body
+        };
+
         output.push_str(&format!(
-            "define i64 @{}() {{\nentry:\n{body}}}\n\n",
+            "define {return_type} @{}() {{\nentry:\n{body}}}\n\n",
             function.name
         ));
     }
 
     Ok(output)
+}
+
+fn normalize_main_returns(body: &str) -> String {
+    let mut output = String::new();
+    for line in body.lines() {
+        if let Some(value) = line.trim().strip_prefix("ret i64 ") {
+            if let Ok(value) = value.parse::<i64>() {
+                output.push_str(&format!("  ret i32 {}\n", value as i32));
+            } else {
+                output.push_str(&format!("  %lyra.main.exit = trunc i64 {value} to i32\n"));
+                output.push_str("  ret i32 %lyra.main.exit\n");
+            }
+        } else {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output
 }
 
 #[derive(Default)]
@@ -170,7 +199,8 @@ mod tests {
         let llvm = emit_llvm_ir(&module).expect("comparison should lower");
         assert!(llvm.contains("icmp sgt i64 42, 7"));
         assert!(llvm.contains("zext i1 %1 to i64"));
-        assert!(llvm.contains("ret i64 %2"));
+        assert!(llvm.contains("trunc i64 %2 to i32"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
     }
 
     #[test]
@@ -195,8 +225,9 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("LLVM IR emission should succeed");
-        assert!(llvm.contains("define i64 @main()"));
+        assert!(llvm.contains("define i32 @main()"));
         assert!(llvm.contains("add i64 40, 2"));
-        assert!(llvm.contains("ret i64 %1"));
+        assert!(llvm.contains("trunc i64 %1 to i32"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
     }
 }

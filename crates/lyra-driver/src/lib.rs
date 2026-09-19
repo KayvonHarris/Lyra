@@ -81,7 +81,8 @@ mod tests {
         let llvm = compile_to_llvm("fn main() { return 40 + 2; }")
             .expect("valid integer program should lower to LLVM IR");
         assert!(llvm.contains("add i64 40, 2"));
-        assert!(llvm.contains("ret i64 %1"));
+        assert!(llvm.contains("trunc i64 %1 to i32"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
     }
 
     #[test]
