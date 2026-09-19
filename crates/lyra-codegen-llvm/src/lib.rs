@@ -47,9 +47,10 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             }
         }
 
-        if !terminated && !body
-            .lines()
-            .any(|line| line.trim_start().starts_with("ret "))
+        if !terminated
+            && !body
+                .lines()
+                .any(|line| line.trim_start().starts_with("ret "))
         {
             body.push_str("  ret i64 0\n");
         }
