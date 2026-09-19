@@ -16,12 +16,20 @@ pub enum Item {
 pub struct Function {
     pub name: String,
     pub parameters: Vec<Parameter>,
+    pub return_type: Option<TypeName>,
     pub body: Block,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
+    pub name: String,
+    pub type_name: Option<TypeName>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeName {
     pub name: String,
     pub span: Span,
 }
