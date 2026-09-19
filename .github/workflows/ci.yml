@@ -62,3 +62,20 @@ jobs:
       - name: Release build
         if: steps.packages.outputs.has_packages == 'true'
         run: cargo build --workspace --release
+
+      - name: Validate generated LLVM IR
+        if: steps.packages.outputs.has_packages == 'true'
+        run: |
+          target/release/lyra --emit-llvm examples/native_exit.ly > /tmp/lyra-native-exit.ll
+          clang -x ir -fsyntax-only /tmp/lyra-native-exit.ll
+
+      - name: Build and execute native Lyra program
+        if: steps.packages.outputs.has_packages == 'true'
+        shell: bash
+        run: |
+          target/release/lyra build examples/native_exit.ly -o /tmp/lyra-native-exit
+          set +e
+          /tmp/lyra-native-exit
+          code=$?
+          set -e
+          test "$code" -eq 42
