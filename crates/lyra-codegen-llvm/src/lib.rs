@@ -294,6 +294,7 @@ mod tests {
             functions: vec![Function {
                 name: "main".into(),
                 parameters: vec![],
+                return_type: Type::Integer,
                 body: Block {
                     instructions: vec![Instruction::Return {
                         value: Some(Value::Binary {
@@ -352,6 +353,7 @@ mod tests {
                 Function {
                     name: "main".into(),
                     parameters: vec![],
+                return_type: Type::Integer,
                     body: Block {
                         instructions: vec![Instruction::Return {
                             value: Some(Value::Call {
@@ -381,6 +383,7 @@ mod tests {
             functions: vec![Function {
                 name: "main".into(),
                 parameters: vec![],
+                return_type: Type::Integer,
                 body: Block {
                     instructions: vec![Instruction::Return {
                         value: Some(Value::Binary {
