@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn accepts_well_typed_program() {
-        let analysis = analyze_source("fn main() { let speed = 65.0; return speed >= 60; }");
+        let analysis = analyze_source("fn is_fast() -> Bool { let speed = 65.0; return speed >= 60; }");
         assert!(analysis.diagnostics.is_empty());
     }
 
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn promotes_mixed_numeric_arithmetic_to_float() {
-        let analysis = analyze_source("fn main() { let speed = 60 + 5.5; return speed; }");
+        let analysis = analyze_source("fn speed() -> Float { let speed = 60 + 5.5; return speed; }");
         assert!(analysis.diagnostics.is_empty());
     }
 
@@ -563,7 +563,7 @@ mod tests {
 
     #[test]
     fn accepts_numeric_equality_across_integer_and_float() {
-        let analysis = analyze_source("fn main() { return 1 == 1.0; }");
+        let analysis = analyze_source("fn equal() -> Bool { return 1 == 1.0; }");
         assert!(analysis.diagnostics.is_empty());
     }
 
