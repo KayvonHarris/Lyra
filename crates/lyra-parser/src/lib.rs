@@ -465,8 +465,7 @@ mod tests {
 
     #[test]
     fn parses_typed_function_signature() {
-        let (module, diagnostics) =
-            parse_source("fn add(a: Int, b: Int) -> Int { return a + b; }");
+        let (module, diagnostics) = parse_source("fn add(a: Int, b: Int) -> Int { return a + b; }");
         assert!(diagnostics.is_empty());
         let Item::Function(function) = &module.items[0];
         assert_eq!(
