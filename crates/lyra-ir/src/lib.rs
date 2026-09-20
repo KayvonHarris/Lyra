@@ -15,6 +15,7 @@ pub struct Module {
 pub struct Function {
     pub name: String,
     pub parameters: Vec<Parameter>,
+    pub return_type: Type,
     pub body: Block,
     pub span: Span,
 }
@@ -22,7 +23,18 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub name: String,
+    pub ty: Type,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type {
+    Integer,
+    Float,
+    String,
+    Boolean,
+    Unit,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -132,9 +144,17 @@ fn lower_function(function: &lyra_ast::Function) -> Function {
             .iter()
             .map(|parameter| Parameter {
                 name: parameter.name.clone(),
+                ty: parameter
+                    .type_name
+                    .as_ref()
+                    .map_or(Type::Integer, lower_type_name),
                 span: parameter.span,
             })
             .collect(),
+        return_type: function
+            .return_type
+            .as_ref()
+            .map_or(Type::Integer, lower_type_name),
         body: Block {
             instructions: function
                 .body
@@ -201,6 +221,17 @@ fn lower_expression(expression: &lyra_ast::Expression) -> Value {
             right: Box::new(lower_expression(right)),
             span: *span,
         },
+    }
+}
+
+fn lower_type_name(type_name: &lyra_ast::TypeName) -> Type {
+    match type_name.name.as_str() {
+        "Int" => Type::Integer,
+        "Float" => Type::Float,
+        "String" => Type::String,
+        "Bool" => Type::Boolean,
+        "Unit" => Type::Unit,
+        _ => Type::Unknown,
     }
 }
 
@@ -276,6 +307,17 @@ mod tests {
                 ..
             } if callee == "add" && arguments.len() == 2
         ));
+    }
+
+    #[test]
+    fn lowers_typed_function_signature() {
+        let module = lower_source(
+            "fn add(a: Int, b: Int) -> Int { return a + b; } fn main() -> Int { return add(20, 22); }",
+        );
+        assert_eq!(module.functions[0].parameters[0].ty, Type::Integer);
+        assert_eq!(module.functions[0].parameters[1].ty, Type::Integer);
+        assert_eq!(module.functions[0].return_type, Type::Integer);
+        assert_eq!(module.functions[1].return_type, Type::Integer);
     }
 
     #[test]
