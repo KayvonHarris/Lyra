@@ -61,7 +61,10 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                         body.push_str(&format!("  ret {ty} {operand}\n"));
                     } else {
                         let ty = llvm_type(function.return_type)?;
-                        body.push_str(&format!("  ret {ty} {}\n", default_value(function.return_type)?));
+                        body.push_str(&format!(
+                            "  ret {ty} {}\n",
+                            default_value(function.return_type)?
+                        ));
                     }
                     terminated = true;
                 }
@@ -74,7 +77,10 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 .any(|line| line.trim_start().starts_with("ret "))
         {
             let ty = llvm_type(function.return_type)?;
-            body.push_str(&format!("  ret {ty} {}\n", default_value(function.return_type)?));
+            body.push_str(&format!(
+                "  ret {ty} {}\n",
+                default_value(function.return_type)?
+            ));
         }
 
         let return_type = if function.name == "main" {
