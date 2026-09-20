@@ -65,8 +65,7 @@ impl Analyzer {
                             self.error("`main` must return Int", function.span);
                         }
                     }
-                    self.functions
-.insert(
+                    self.functions.insert(
                             function.name.clone(),
                             FunctionSignature {
                                 parameters: function
@@ -186,7 +185,10 @@ impl Analyzer {
                 span,
             } => {
                 if callee == "main" {
-                    self.error("`main` is the program entry point and cannot be called", *span);
+                    self.error(
+                        "`main` is the program entry point and cannot be called",
+                        *span,
+                    );
                     return Type::Unknown;
                 }
                 let argument_types = arguments
@@ -196,10 +198,8 @@ impl Analyzer {
                 match self.functions.get(callee).cloned() {
                     Some(signature) if signature.parameters.len() == arguments.len() => {
                         let mut valid = true;
-                        for (index, (actual, expected)) in argument_types
-                            .iter()
-                            .zip(&signature.parameters)
-                            .enumerate()
+                        for (index, (actual, expected)) in
+                            argument_types.iter().zip(&signature.parameters).enumerate()
                         {
                             if *actual != Type::Unknown && actual != expected {
                                 self.error(
@@ -214,7 +214,11 @@ impl Analyzer {
                                 valid = false;
                             }
                         }
-                        if valid { signature.return_type } else { Type::Unknown }
+                        if valid {
+                            signature.return_type
+                        } else {
+                            Type::Unknown
+                        }
                     }
                     Some(signature) => {
                         self.error(
@@ -419,34 +423,46 @@ mod tests {
     #[test]
     fn rejects_typed_return_mismatch() {
         let analysis = analyze_source("fn answer() -> Bool { return 42; }");
-        assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("return type mismatch")
-        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("return type mismatch") })
+        );
     }
 
     #[test]
     fn rejects_main_parameters() {
         let analysis = analyze_source("fn main(argc: Int) -> Int { return argc; }");
-        assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("cannot declare parameters")
-        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("cannot declare parameters") })
+        );
     }
 
     #[test]
     fn rejects_calling_main() {
         let analysis =
             analyze_source("fn main() -> Int { return 0; } fn helper() -> Int { return main(); }");
-        assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("cannot be called")
-        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("cannot be called") })
+        );
     }
 
     #[test]
     fn rejects_non_integer_main_return_type() {
         let analysis = analyze_source("fn main() -> Bool { return true; }");
-        assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("must return Int")
-        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("must return Int") })
+        );
     }
 
     #[test]
