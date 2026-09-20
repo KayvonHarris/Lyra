@@ -432,9 +432,8 @@ mod tests {
 
     #[test]
     fn rejects_non_boolean_if_condition() {
-        let analysis = analyze_source(
-            "fn main() -> Int { if 42 { return 1; } else { return 0; } }",
-        );
+        let analysis =
+            analyze_source("fn main() -> Int { if 42 { return 1; } else { return 0; } }");
         assert!(
             analysis
                 .diagnostics
