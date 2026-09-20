@@ -192,6 +192,20 @@ impl Analyzer {
                     self.pop_scope();
                 }
             }
+            Statement::While {
+                condition, body, ..
+            } => {
+                let condition_type = self.check_expression(condition);
+                if condition_type != Type::Boolean && condition_type != Type::Unknown {
+                    self.error("while condition must be Bool", condition.span());
+                }
+
+                self.push_scope();
+                for statement in &body.statements {
+                    self.check_statement(statement);
+                }
+                self.pop_scope();
+            }
             Statement::Expression { expression, .. } => {
                 self.check_expression(expression);
             }
@@ -453,6 +467,33 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("unknown identifier"))
         );
+    }
+
+    #[test]
+    fn accepts_boolean_while_condition() {
+        let analysis =
+            analyze_source("fn main() -> Int { while true { return 42; } return 0; }");
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_boolean_while_condition() {
+        let analysis = analyze_source("fn main() -> Int { while 42 { return 1; } return 0; }");
+        assert!(analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("while condition must be Bool")));
+    }
+
+    #[test]
+    fn isolates_while_body_scope() {
+        let analysis = analyze_source(
+            "fn main() -> Int { while false { let loop_value = 42; } return loop_value; }",
+        );
+        assert!(analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unknown identifier")));
     }
 
     #[test]
