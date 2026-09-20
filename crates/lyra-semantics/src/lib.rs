@@ -167,6 +167,31 @@ impl Analyzer {
                     );
                 }
             }
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+                ..
+            } => {
+                let condition_type = self.check_expression(condition);
+                if condition_type != Type::Boolean && condition_type != Type::Unknown {
+                    self.error("if condition must be Bool", condition.span());
+                }
+
+                self.push_scope();
+                for statement in &then_block.statements {
+                    self.check_statement(statement);
+                }
+                self.pop_scope();
+
+                if let Some(else_block) = else_block {
+                    self.push_scope();
+                    for statement in &else_block.statements {
+                        self.check_statement(statement);
+                    }
+                    self.pop_scope();
+                }
+            }
             Statement::Expression { expression, .. } => {
                 self.check_expression(expression);
             }
@@ -395,6 +420,39 @@ mod tests {
         let analysis =
             analyze_source("fn is_fast() -> Bool { let speed = 65.0; return speed >= 60; }");
         assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_boolean_if_else_condition() {
+        let analysis = analyze_source(
+            "fn main() -> Int { let speed = 65; if speed >= 60 { return 42; } else { return 0; } }",
+        );
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_boolean_if_condition() {
+        let analysis =
+            analyze_source("fn main() -> Int { if 42 { return 1; } else { return 0; } }");
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("if condition must be Bool"))
+        );
+    }
+
+    #[test]
+    fn isolates_if_branch_scopes() {
+        let analysis = analyze_source(
+            "fn main() -> Int { if true { let branch_value = 42; } return branch_value; }",
+        );
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown identifier"))
+        );
     }
 
     #[test]

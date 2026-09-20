@@ -101,3 +101,14 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 42
+
+      - name: Build and execute native Lyra conditional
+        if: steps.packages.outputs.has_packages == 'true'
+        shell: bash
+        run: |
+          target/release/lyra build examples/if_else.ly -o /tmp/lyra-if-else
+          set +e
+          /tmp/lyra-if-else
+          code=$?
+          set -e
+          test "$code" -eq 42

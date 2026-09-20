@@ -136,6 +136,9 @@ impl<'a> Parser<'a> {
         if self.matches(|kind| matches!(kind, TokenKind::Return)) {
             return self.parse_return_statement();
         }
+        if self.matches(|kind| matches!(kind, TokenKind::If)) {
+            return self.parse_if_statement();
+        }
 
         let expression = self.parse_expression()?;
         let start = expression.span().start;
@@ -184,6 +187,27 @@ impl<'a> Parser<'a> {
         Some(Statement::Return {
             value,
             span: Span::new(start, semicolon.span.end),
+        })
+    }
+
+    fn parse_if_statement(&mut self) -> Option<Statement> {
+        let start = self.previous().span.start;
+        let condition = self.parse_expression()?;
+        let then_block = self.parse_block()?;
+        let else_block = if self.matches(|kind| matches!(kind, TokenKind::Else)) {
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+        let end = else_block
+            .as_ref()
+            .map_or(then_block.span.end, |block| block.span.end);
+
+        Some(Statement::If {
+            condition,
+            then_block,
+            else_block,
+            span: Span::new(start, end),
         })
     }
 

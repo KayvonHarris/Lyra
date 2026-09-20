@@ -51,6 +51,12 @@ pub enum Statement {
         value: Option<Expression>,
         span: Span,
     },
+    If {
+        condition: Expression,
+        then_block: Block,
+        else_block: Option<Block>,
+        span: Span,
+    },
     Expression {
         expression: Expression,
         span: Span,

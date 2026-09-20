@@ -57,6 +57,12 @@ pub enum Instruction {
         value: Option<Value>,
         span: Span,
     },
+    If {
+        condition: Value,
+        then_block: Block,
+        else_block: Option<Block>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,15 +161,14 @@ fn lower_function(function: &lyra_ast::Function) -> Function {
             .return_type
             .as_ref()
             .map_or(Type::Integer, lower_type_name),
-        body: Block {
-            instructions: function
-                .body
-                .statements
-                .iter()
-                .map(lower_statement)
-                .collect(),
-        },
+        body: lower_block(&function.body),
         span: function.span,
+    }
+}
+
+fn lower_block(block: &lyra_ast::Block) -> Block {
+    Block {
+        instructions: block.statements.iter().map(lower_statement).collect(),
     }
 }
 
@@ -176,6 +181,17 @@ fn lower_statement(statement: &lyra_ast::Statement) -> Instruction {
         },
         lyra_ast::Statement::Return { value, span } => Instruction::Return {
             value: value.as_ref().map(lower_expression),
+            span: *span,
+        },
+        lyra_ast::Statement::If {
+            condition,
+            then_block,
+            else_block,
+            span,
+        } => Instruction::If {
+            condition: lower_expression(condition),
+            then_block: lower_block(then_block),
+            else_block: else_block.as_ref().map(lower_block),
             span: *span,
         },
         lyra_ast::Statement::Expression { expression, span } => Instruction::Evaluate {
@@ -318,6 +334,26 @@ mod tests {
         assert_eq!(module.functions[0].parameters[1].ty, Type::Integer);
         assert_eq!(module.functions[0].return_type, Type::Integer);
         assert_eq!(module.functions[1].return_type, Type::Integer);
+    }
+
+    #[test]
+    fn lowers_if_else_control_flow() {
+        let module = lower_source(
+            "fn main() -> Int { let speed = 65; if speed >= 60 { return 42; } else { return 0; } }",
+        );
+        assert!(matches!(
+            &module.functions[0].body.instructions[1],
+            Instruction::If {
+                condition: Value::Binary {
+                    operator: BinaryOperator::GreaterEqual,
+                    ..
+                },
+                then_block,
+                else_block: Some(else_block),
+                ..
+            } if matches!(then_block.instructions[0], Instruction::Return { .. })
+                && matches!(else_block.instructions[0], Instruction::Return { .. })
+        ));
     }
 
     #[test]
