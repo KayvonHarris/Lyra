@@ -372,9 +372,7 @@ mod tests {
 
     #[test]
     fn lowers_while_control_flow() {
-        let module = lower_source(
-            "fn main() -> Int { while true { return 42; } return 0; }",
-        );
+        let module = lower_source("fn main() -> Int { while true { return 42; } return 0; }");
         assert!(matches!(
             &module.functions[0].body.instructions[0],
             Instruction::While {
