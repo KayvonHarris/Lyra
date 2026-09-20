@@ -6,13 +6,14 @@ use lyra_ast::{BinaryOperator, Expression, Item, Module, Statement, TypeName, Un
 use lyra_diagnostics::{Diagnostic, Severity};
 use lyra_span::Span;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Type {
     Integer,
     Float,
     String,
     Boolean,
     Unit,
+    #[default]
     Unknown,
 }
 
