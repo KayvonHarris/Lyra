@@ -353,7 +353,7 @@ mod tests {
                 Function {
                     name: "main".into(),
                     parameters: vec![],
-                return_type: Type::Integer,
+                    return_type: Type::Integer,
                     body: Block {
                         instructions: vec![Instruction::Return {
                             value: Some(Value::Call {
