@@ -66,24 +66,24 @@ impl Analyzer {
                         }
                     }
                     self.functions.insert(
-                            function.name.clone(),
-                            FunctionSignature {
-                                parameters: function
-                                    .parameters
-                                    .iter()
-                                    .map(|parameter| {
-                                        parameter
-                                            .type_name
-                                            .as_ref()
-                                            .map_or(Type::Integer, Self::type_from_name)
-                                    })
-                                    .collect(),
-                                return_type: function
-                                    .return_type
-                                    .as_ref()
-                                    .map_or(Type::Integer, Self::type_from_name),
-                            },
-                        );
+                        function.name.clone(),
+                        FunctionSignature {
+                            parameters: function
+                                .parameters
+                                .iter()
+                                .map(|parameter| {
+                                    parameter
+                                        .type_name
+                                        .as_ref()
+                                        .map_or(Type::Integer, Self::type_from_name)
+                                })
+                                .collect(),
+                            return_type: function
+                                .return_type
+                                .as_ref()
+                                .map_or(Type::Integer, Self::type_from_name),
+                        },
+                    );
                 }
             }
         }
