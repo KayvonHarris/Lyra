@@ -73,7 +73,9 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                     )?;
                 }
                 Instruction::While {
-                    condition, body: loop_body, ..
+                    condition,
+                    body: loop_body,
+                    ..
                 } => {
                     emitter.emit_while(condition, loop_body, function.return_type, &mut body)?;
                 }
@@ -292,7 +294,9 @@ impl<'a> FunctionEmitter<'a> {
         let body_label = self.block_label("while.body");
         let exit_label = self.block_label("while.end");
 
-        body.push_str(&format!("  br label %{condition_label}\n\n{condition_label}:\n"));
+        body.push_str(&format!(
+            "  br label %{condition_label}\n\n{condition_label}:\n"
+        ));
         let condition = self.emit_value(condition, body)?;
         let condition_i1 = self.register();
         body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
