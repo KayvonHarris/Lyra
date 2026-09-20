@@ -53,6 +53,18 @@ impl Analyzer {
                     );
                 }
                 Item::Function(function) => {
+                    if function.name == "main" && !function.parameters.is_empty() {
+                        self.error("`main` cannot declare parameters yet", function.span);
+                    }
+                    if function.name == "main" {
+                        let return_type = function
+                            .return_type
+                            .as_ref()
+                            .map_or(Type::Integer, Self::type_from_name);
+                        if return_type != Type::Integer {
+                            self.error("`main` must return Int", function.span);
+                        }
+                    }
                     self.functions
 .insert(
                             function.name.clone(),
@@ -173,6 +185,10 @@ impl Analyzer {
                 arguments,
                 span,
             } => {
+                if callee == "main" {
+                    self.error("`main` is the program entry point and cannot be called", *span);
+                    return Type::Unknown;
+                }
                 let argument_types = arguments
                     .iter()
                     .map(|argument| self.check_expression(argument))
@@ -405,6 +421,31 @@ mod tests {
         let analysis = analyze_source("fn answer() -> Bool { return 42; }");
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains("return type mismatch")
+        }));
+    }
+
+    #[test]
+    fn rejects_main_parameters() {
+        let analysis = analyze_source("fn main(argc: Int) -> Int { return argc; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("cannot declare parameters")
+        }));
+    }
+
+    #[test]
+    fn rejects_calling_main() {
+        let analysis =
+            analyze_source("fn main() -> Int { return 0; } fn helper() -> Int { return main(); }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("cannot be called")
+        }));
+    }
+
+    #[test]
+    fn rejects_non_integer_main_return_type() {
+        let analysis = analyze_source("fn main() -> Bool { return true; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("must return Int")
         }));
     }
 
