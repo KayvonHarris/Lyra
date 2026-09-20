@@ -6,24 +6,32 @@
 
 use std::collections::HashMap;
 
-use lyra_ir::{BinaryOperator, Instruction, Module, UnaryOperator, Value};
+use lyra_ir::{BinaryOperator, Instruction, Module, Type, UnaryOperator, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodegenError {
     Unsupported(&'static str),
     UnknownLocal(String),
+    UnknownFunction(String),
 }
 
 pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
+    let signatures = module
+        .functions
+        .iter()
+        .map(|function| (function.name.clone(), function.return_type))
+        .collect::<HashMap<_, _>>();
     let mut output = String::from("; ModuleID = 'lyra'\nsource_filename = \"lyra\"\n\n");
 
     for function in &module.functions {
-        let mut emitter = FunctionEmitter::default();
+        let mut emitter = FunctionEmitter::new(&signatures);
         let mut body = String::new();
         let parameters = function
             .parameters
             .iter()
-            .map(|parameter| format!("i64 %{}", parameter.name))
+            .map(|parameter| Ok(format!("{} %{}", llvm_type(parameter.ty)?, parameter.name)))
+            .collect::<Result<Vec<_>, CodegenError>>()?
+            .into_iter()
             .collect::<Vec<_>>()
             .join(", ");
         for parameter in &function.parameters {
@@ -49,9 +57,14 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 Instruction::Return { value, .. } => {
                     if let Some(value) = value {
                         let operand = emitter.emit_value(value, &mut body)?;
-                        body.push_str(&format!("  ret i64 {operand}\n"));
+                        let ty = llvm_type(function.return_type)?;
+                        body.push_str(&format!("  ret {ty} {operand}\n"));
                     } else {
-                        body.push_str("  ret i64 0\n");
+                        let ty = llvm_type(function.return_type)?;
+                        body.push_str(&format!(
+                            "  ret {ty} {}\n",
+                            default_value(function.return_type)?
+                        ));
                     }
                     terminated = true;
                 }
@@ -63,13 +76,17 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 .lines()
                 .any(|line| line.trim_start().starts_with("ret "))
         {
-            body.push_str("  ret i64 0\n");
+            let ty = llvm_type(function.return_type)?;
+            body.push_str(&format!(
+                "  ret {ty} {}\n",
+                default_value(function.return_type)?
+            ));
         }
 
         let return_type = if function.name == "main" {
             "i32"
         } else {
-            "i64"
+            llvm_type(function.return_type)?
         };
         let body = if function.name == "main" {
             normalize_main_returns(&body)
@@ -104,13 +121,40 @@ fn normalize_main_returns(body: &str) -> String {
     output
 }
 
-#[derive(Default)]
-struct FunctionEmitter {
-    next_register: usize,
-    locals: HashMap<String, String>,
+fn llvm_type(ty: Type) -> Result<&'static str, CodegenError> {
+    match ty {
+        Type::Integer | Type::Boolean => Ok("i64"),
+        Type::Float => Ok("double"),
+        Type::Unit => Ok("i64"),
+        Type::String => Err(CodegenError::Unsupported("string function types")),
+        Type::Unknown => Err(CodegenError::Unsupported("unknown function types")),
+    }
 }
 
-impl FunctionEmitter {
+fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
+    match ty {
+        Type::Integer | Type::Boolean | Type::Unit => Ok("0"),
+        Type::Float => Ok("0.0"),
+        Type::String => Err(CodegenError::Unsupported("string function types")),
+        Type::Unknown => Err(CodegenError::Unsupported("unknown function types")),
+    }
+}
+
+struct FunctionEmitter<'a> {
+    next_register: usize,
+    locals: HashMap<String, String>,
+    signatures: &'a HashMap<String, Type>,
+}
+
+impl<'a> FunctionEmitter<'a> {
+    fn new(signatures: &'a HashMap<String, Type>) -> Self {
+        Self {
+            next_register: 0,
+            locals: HashMap::new(),
+            signatures,
+        }
+    }
+
     fn register(&mut self) -> String {
         self.next_register += 1;
         format!("%{}", self.next_register)
@@ -128,6 +172,11 @@ impl FunctionEmitter {
             Value::Call {
                 callee, arguments, ..
             } => {
+                let return_type = self
+                    .signatures
+                    .get(callee)
+                    .copied()
+                    .ok_or_else(|| CodegenError::UnknownFunction(callee.clone()))?;
                 let mut operands = Vec::with_capacity(arguments.len());
                 for argument in arguments {
                     let operand = self.emit_value(argument, body)?;
@@ -135,7 +184,8 @@ impl FunctionEmitter {
                 }
                 let register = self.register();
                 body.push_str(&format!(
-                    "  {register} = call i64 @{callee}({})\n",
+                    "  {register} = call {} @{callee}({})\n",
+                    llvm_type(return_type)?,
                     operands.join(", ")
                 ));
                 Ok(register)
@@ -205,7 +255,7 @@ impl FunctionEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lyra_ir::{Block, Function};
+    use lyra_ir::{Block, Function, Type};
     use lyra_span::Span;
 
     #[test]
@@ -215,6 +265,7 @@ mod tests {
             functions: vec![Function {
                 name: "main".into(),
                 parameters: vec![],
+                return_type: Type::Integer,
                 body: Block {
                     instructions: vec![
                         Instruction::Return {
@@ -243,6 +294,7 @@ mod tests {
             functions: vec![Function {
                 name: "main".into(),
                 parameters: vec![],
+                return_type: Type::Integer,
                 body: Block {
                     instructions: vec![Instruction::Return {
                         value: Some(Value::Binary {
@@ -275,13 +327,16 @@ mod tests {
                     parameters: vec![
                         lyra_ir::Parameter {
                             name: "a".into(),
+                            ty: Type::Integer,
                             span,
                         },
                         lyra_ir::Parameter {
                             name: "b".into(),
+                            ty: Type::Integer,
                             span,
                         },
                     ],
+                    return_type: Type::Integer,
                     body: Block {
                         instructions: vec![Instruction::Return {
                             value: Some(Value::Binary {
@@ -298,6 +353,7 @@ mod tests {
                 Function {
                     name: "main".into(),
                     parameters: vec![],
+                    return_type: Type::Integer,
                     body: Block {
                         instructions: vec![Instruction::Return {
                             value: Some(Value::Call {
@@ -327,6 +383,7 @@ mod tests {
             functions: vec![Function {
                 name: "main".into(),
                 parameters: vec![],
+                return_type: Type::Integer,
                 body: Block {
                     instructions: vec![Instruction::Return {
                         value: Some(Value::Binary {

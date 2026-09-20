@@ -90,3 +90,14 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 42
+
+      - name: Build and execute typed native Lyra function call
+        if: steps.packages.outputs.has_packages == 'true'
+        shell: bash
+        run: |
+          target/release/lyra build examples/typed_function_call.ly -o /tmp/lyra-typed-function-call
+          set +e
+          /tmp/lyra-typed-function-call
+          code=$?
+          set -e
+          test "$code" -eq 42

@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn accepts_valid_program_through_full_frontend() {
-        let output = compile("fn main() { let speed = 65.0; return speed >= 60; }");
+        let output = compile("fn is_fast() -> Bool { let speed = 65.0; return speed >= 60; }");
         assert!(output.diagnostics.is_empty());
         assert!(output.ir.is_some());
     }

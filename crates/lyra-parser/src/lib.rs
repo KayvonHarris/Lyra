@@ -1,7 +1,8 @@
 //! Parser for the Lyra language.
 
 use lyra_ast::{
-    BinaryOperator, Block, Expression, Function, Item, Module, Parameter, Statement, UnaryOperator,
+    BinaryOperator, Block, Expression, Function, Item, Module, Parameter, Statement, TypeName,
+    UnaryOperator,
 };
 use lyra_diagnostics::{Diagnostic, Severity};
 use lyra_lexer::{Token, TokenKind};
@@ -63,9 +64,17 @@ impl<'a> Parser<'a> {
                 let parameter_start = self.peek().span.start;
                 let parameter_name =
                     self.expect_identifier("expected parameter name in function declaration")?;
-                let parameter_end = self.previous().span.end;
+                let type_name = if self.matches(|kind| matches!(kind, TokenKind::Colon)) {
+                    Some(self.parse_type_name("expected parameter type after `: `")?)
+                } else {
+                    None
+                };
+                let parameter_end = type_name
+                    .as_ref()
+                    .map_or(self.previous().span.end, |type_name| type_name.span.end);
                 parameters.push(Parameter {
                     name: parameter_name,
+                    type_name,
                     span: Span::new(parameter_start, parameter_end),
                 });
 
@@ -78,12 +87,18 @@ impl<'a> Parser<'a> {
             |kind| matches!(kind, TokenKind::RParen),
             "expected `)` after function parameters",
         )?;
+        let return_type = if self.matches(|kind| matches!(kind, TokenKind::Arrow)) {
+            Some(self.parse_type_name("expected return type after `->`")?)
+        } else {
+            None
+        };
         let body = self.parse_block()?;
         let span = Span::new(start, body.span.end);
 
         Some(Function {
             name,
             parameters,
+            return_type,
             body,
             span,
         })
@@ -289,6 +304,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_type_name(&mut self, message: &str) -> Option<TypeName> {
+        let token = self.peek().clone();
+        let name = self.expect_identifier(message)?;
+        Some(TypeName {
+            name,
+            span: token.span,
+        })
+    }
+
     fn expect_identifier(&mut self, message: &str) -> Option<String> {
         match self.peek().kind.clone() {
             TokenKind::Identifier(name) => {
@@ -437,6 +461,34 @@ mod tests {
                 ..
             } if callee == "add" && arguments.len() == 2
         ));
+    }
+
+    #[test]
+    fn parses_typed_function_signature() {
+        let (module, diagnostics) = parse_source("fn add(a: Int, b: Int) -> Int { return a + b; }");
+        assert!(diagnostics.is_empty());
+        let Item::Function(function) = &module.items[0];
+        assert_eq!(
+            function.parameters[0]
+                .type_name
+                .as_ref()
+                .map(|type_name| type_name.name.as_str()),
+            Some("Int")
+        );
+        assert_eq!(
+            function.parameters[1]
+                .type_name
+                .as_ref()
+                .map(|type_name| type_name.name.as_str()),
+            Some("Int")
+        );
+        assert_eq!(
+            function
+                .return_type
+                .as_ref()
+                .map(|type_name| type_name.name.as_str()),
+            Some("Int")
+        );
     }
 
     #[test]
