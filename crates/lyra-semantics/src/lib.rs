@@ -471,18 +471,19 @@ mod tests {
 
     #[test]
     fn accepts_boolean_while_condition() {
-        let analysis =
-            analyze_source("fn main() -> Int { while true { return 42; } return 0; }");
+        let analysis = analyze_source("fn main() -> Int { while true { return 42; } return 0; }");
         assert!(analysis.diagnostics.is_empty());
     }
 
     #[test]
     fn rejects_non_boolean_while_condition() {
         let analysis = analyze_source("fn main() -> Int { while 42 { return 1; } return 0; }");
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("while condition must be Bool")));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("while condition must be Bool"))
+        );
     }
 
     #[test]
@@ -490,10 +491,12 @@ mod tests {
         let analysis = analyze_source(
             "fn main() -> Int { while false { let loop_value = 42; } return loop_value; }",
         );
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("unknown identifier")));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown identifier"))
+        );
     }
 
     #[test]
