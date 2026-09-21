@@ -64,6 +64,42 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BasicBlock {
+    pub id: BlockId,
+    pub instructions: Vec<Instruction>,
+    pub terminator: Terminator,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ControlFlowGraph {
+    pub blocks: Vec<BasicBlock>,
+}
+
+impl ControlFlowGraph {
+    #[must_use]
+    pub fn block(&self, id: BlockId) -> Option<&BasicBlock> {
+        self.blocks.iter().find(|block| block.id == id)
+    }
+
+    #[must_use]
+    pub fn successors(&self, id: BlockId) -> Vec<BlockId> {
+        let Some(block) = self.block(id) else {
+            return Vec::new();
+        };
+
+        match &block.terminator {
+            Terminator::Return { .. } => Vec::new(),
+            Terminator::Jump { target, .. } => vec![*target],
+            Terminator::Branch {
+                then_target,
+                else_target,
+                ..
+            } => vec![*then_target, *else_target],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     Bind {
         name: String,
@@ -437,6 +473,46 @@ mod tests {
                 ..
             } if matches!(body.instructions[0], Instruction::Return { .. })
         ));
+    }
+
+    #[test]
+    fn models_basic_block_successors() {
+        let span = Span { start: 0, end: 0 };
+        let cfg = ControlFlowGraph {
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::Boolean(true, span),
+                        then_target: BlockId(1),
+                        else_target: BlockId(2),
+                        span,
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![],
+                    terminator: Terminator::Jump {
+                        target: BlockId(2),
+                        span,
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(2),
+                    instructions: vec![],
+                    terminator: Terminator::Return {
+                        value: Some(Value::Integer(42, span)),
+                        span,
+                    },
+                },
+            ],
+        };
+
+        assert_eq!(cfg.successors(BlockId(0)), vec![BlockId(1), BlockId(2)]);
+        assert_eq!(cfg.successors(BlockId(1)), vec![BlockId(2)]);
+        assert!(cfg.successors(BlockId(2)).is_empty());
+        assert!(cfg.block(BlockId(99)).is_none());
     }
 
     #[test]
