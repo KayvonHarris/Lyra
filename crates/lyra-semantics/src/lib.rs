@@ -121,13 +121,7 @@ impl Analyzer {
                                 .type_name
                                 .as_ref()
                                 .map_or(Type::Integer, Self::type_from_name);
-                            scope.insert(
-                                parameter.name.clone(),
-                                Binding {
-                                    ty,
-                                    mutable: false,
-                                },
-                            );
+                            scope.insert(parameter.name.clone(), Binding { ty, mutable: false });
                         }
                     }
                     for statement in &function.body.statements {
@@ -160,13 +154,7 @@ impl Analyzer {
                         *span,
                     );
                 } else if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(
-                        name.clone(),
-                        Binding {
-                            ty,
-                            mutable: false,
-                        },
-                    );
+                    scope.insert(name.clone(), Binding { ty, mutable: false });
                 } else {
                     self.error("internal semantic error: no active scope", *span);
                 }
@@ -186,13 +174,7 @@ impl Analyzer {
                         *span,
                     );
                 } else if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(
-                        name.clone(),
-                        Binding {
-                            ty,
-                            mutable: true,
-                        },
-                    );
+                    scope.insert(name.clone(), Binding { ty, mutable: true });
                 } else {
                     self.error("internal semantic error: no active scope", *span);
                 }
@@ -210,7 +192,10 @@ impl Analyzer {
 
                 match binding {
                     Some(binding) if !binding.mutable => {
-                        self.error(format!("cannot assign to immutable variable `{name}`"), *span);
+                        self.error(
+                            format!("cannot assign to immutable variable `{name}`"),
+                            *span,
+                        );
                     }
                     Some(binding)
                         if value_type != Type::Unknown
@@ -560,25 +545,33 @@ mod tests {
         let analysis =
             analyze_source("fn main() -> Int { let counter = 0; counter = 1; return counter; }");
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("cannot assign to immutable variable")
+            diagnostic
+                .message
+                .contains("cannot assign to immutable variable")
         }));
     }
 
     #[test]
     fn rejects_assignment_to_unknown_variable() {
         let analysis = analyze_source("fn main() -> Int { counter = 1; return 0; }");
-        assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("unknown identifier `counter`")
-        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("unknown identifier `counter`") })
+        );
     }
 
     #[test]
     fn rejects_mutable_assignment_type_mismatch() {
         let analysis =
             analyze_source("fn main() -> Int { var counter = 0; counter = true; return counter; }");
-        assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("assignment type mismatch")
-        }));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("assignment type mismatch") })
+        );
     }
 
     #[test]
