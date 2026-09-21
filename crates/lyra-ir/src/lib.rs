@@ -37,6 +37,27 @@ pub enum Type {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockId(pub usize);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Terminator {
+    Return {
+        value: Option<Value>,
+        span: Span,
+    },
+    Jump {
+        target: BlockId,
+        span: Span,
+    },
+    Branch {
+        condition: Value,
+        then_target: BlockId,
+        else_target: BlockId,
+        span: Span,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Block {
     pub instructions: Vec<Instruction>,
@@ -415,6 +436,42 @@ mod tests {
                 body,
                 ..
             } if matches!(body.instructions[0], Instruction::Return { .. })
+        ));
+    }
+
+    #[test]
+    fn models_explicit_control_flow_terminators() {
+        let span = Span { start: 0, end: 0 };
+        let branch = Terminator::Branch {
+            condition: Value::Boolean(true, span),
+            then_target: BlockId(1),
+            else_target: BlockId(2),
+            span,
+        };
+        let jump = Terminator::Jump {
+            target: BlockId(3),
+            span,
+        };
+        let ret = Terminator::Return {
+            value: Some(Value::Integer(42, span)),
+            span,
+        };
+
+        assert!(matches!(
+            branch,
+            Terminator::Branch {
+                then_target: BlockId(1),
+                else_target: BlockId(2),
+                ..
+            }
+        ));
+        assert!(matches!(jump, Terminator::Jump { target: BlockId(3), .. }));
+        assert!(matches!(
+            ret,
+            Terminator::Return {
+                value: Some(Value::Integer(42, _)),
+                ..
+            }
         ));
     }
 
