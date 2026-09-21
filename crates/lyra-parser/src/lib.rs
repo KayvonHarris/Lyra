@@ -237,46 +237,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_var_statement(&mut self) -> Option<Statement> {
-        let start = self.previous().span.start;
-        let name = self.expect_identifier("expected variable name after `var`")?;
-        self.expect(
-            |kind| matches!(kind, TokenKind::Equal),
-            "expected `=` after variable name",
-        )?;
-        let value = self.parse_expression()?;
-        let semicolon = self.expect(
-            |kind| matches!(kind, TokenKind::Semicolon),
-            "expected `;` after var statement",
-        )?;
-
-        Some(Statement::Var {
-            name,
-            value,
-            span: Span::new(start, semicolon.span.end),
-        })
-    }
-
-    fn parse_assignment_statement(&mut self) -> Option<Statement> {
-        let start = self.peek().span.start;
-        let name = self.expect_identifier("expected variable name in assignment")?;
-        self.expect(
-            |kind| matches!(kind, TokenKind::Equal),
-            "expected `=` in assignment",
-        )?;
-        let value = self.parse_expression()?;
-        let semicolon = self.expect(
-            |kind| matches!(kind, TokenKind::Semicolon),
-            "expected `;` after assignment",
-        )?;
-
-        Some(Statement::Assign {
-            name,
-            value,
-            span: Span::new(start, semicolon.span.end),
-        })
-    }
-
     fn parse_return_statement(&mut self) -> Option<Statement> {
         let start = self.previous().span.start;
         let value = if self.check(|kind| matches!(kind, TokenKind::Semicolon)) {
