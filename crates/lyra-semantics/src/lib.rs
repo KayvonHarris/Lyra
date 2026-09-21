@@ -33,10 +33,16 @@ struct FunctionSignature {
     return_type: Type,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Binding {
+    ty: Type,
+    mutable: bool,
+}
+
 #[derive(Default)]
 struct Analyzer {
     diagnostics: Vec<Diagnostic>,
-    scopes: Vec<HashMap<String, Type>>,
+    scopes: Vec<HashMap<String, Binding>>,
     functions: HashMap<String, FunctionSignature>,
     current_return_type: Type,
 }
@@ -115,7 +121,13 @@ impl Analyzer {
                                 .type_name
                                 .as_ref()
                                 .map_or(Type::Integer, Self::type_from_name);
-                            scope.insert(parameter.name.clone(), ty);
+                            scope.insert(
+                                parameter.name.clone(),
+                                Binding {
+                                    ty,
+                                    mutable: false,
+                                },
+                            );
                         }
                     }
                     for statement in &function.body.statements {
@@ -148,9 +160,75 @@ impl Analyzer {
                         *span,
                     );
                 } else if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(name.clone(), ty);
+                    scope.insert(
+                        name.clone(),
+                        Binding {
+                            ty,
+                            mutable: false,
+                        },
+                    );
                 } else {
                     self.error("internal semantic error: no active scope", *span);
+                }
+            }
+            Statement::Var {
+                name, value, span, ..
+            } => {
+                let ty = self.check_expression(value);
+                let duplicate = self
+                    .scopes
+                    .last()
+                    .is_some_and(|scope| scope.contains_key(name));
+
+                if duplicate {
+                    self.error(
+                        format!("variable `{name}` is already defined in this scope"),
+                        *span,
+                    );
+                } else if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert(
+                        name.clone(),
+                        Binding {
+                            ty,
+                            mutable: true,
+                        },
+                    );
+                } else {
+                    self.error("internal semantic error: no active scope", *span);
+                }
+            }
+            Statement::Assign {
+                name, value, span, ..
+            } => {
+                let value_type = self.check_expression(value);
+                let binding = self
+                    .scopes
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .copied();
+
+                match binding {
+                    Some(binding) if !binding.mutable => {
+                        self.error(format!("cannot assign to immutable variable `{name}`"), *span);
+                    }
+                    Some(binding)
+                        if value_type != Type::Unknown
+                            && binding.ty != Type::Unknown
+                            && value_type != binding.ty =>
+                    {
+                        self.error(
+                            format!(
+                                "assignment type mismatch for `{name}`: expected {:?} but found {:?}",
+                                binding.ty, value_type
+                            ),
+                            *span,
+                        );
+                    }
+                    Some(_) => {}
+                    None => {
+                        self.error(format!("unknown identifier `{name}`"), *span);
+                    }
                 }
             }
             Statement::Return { value, span } => {
@@ -392,7 +470,7 @@ impl Analyzer {
     fn resolve(&mut self, name: &str, span: Span) -> Type {
         for scope in self.scopes.iter().rev() {
             if let Some(ty) = scope.get(name) {
-                return *ty;
+                return ty.ty;
             }
         }
 
@@ -467,6 +545,40 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("unknown identifier"))
         );
+    }
+
+    #[test]
+    fn accepts_mutable_assignment() {
+        let analysis = analyze_source(
+            "fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }",
+        );
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_assignment_to_immutable_variable() {
+        let analysis =
+            analyze_source("fn main() -> Int { let counter = 0; counter = 1; return counter; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("cannot assign to immutable variable")
+        }));
+    }
+
+    #[test]
+    fn rejects_assignment_to_unknown_variable() {
+        let analysis = analyze_source("fn main() -> Int { counter = 1; return 0; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("unknown identifier `counter`")
+        }));
+    }
+
+    #[test]
+    fn rejects_mutable_assignment_type_mismatch() {
+        let analysis =
+            analyze_source("fn main() -> Int { var counter = 0; counter = true; return counter; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("assignment type mismatch")
+        }));
     }
 
     #[test]
