@@ -49,6 +49,16 @@ pub enum Instruction {
         value: Value,
         span: Span,
     },
+    BindMutable {
+        name: String,
+        value: Value,
+        span: Span,
+    },
+    Assign {
+        name: String,
+        value: Value,
+        span: Span,
+    },
     Evaluate {
         value: Value,
         span: Span,
@@ -180,6 +190,16 @@ fn lower_block(block: &lyra_ast::Block) -> Block {
 fn lower_statement(statement: &lyra_ast::Statement) -> Instruction {
     match statement {
         lyra_ast::Statement::Let { name, value, span } => Instruction::Bind {
+            name: name.clone(),
+            value: lower_expression(value),
+            span: *span,
+        },
+        lyra_ast::Statement::Var { name, value, span } => Instruction::BindMutable {
+            name: name.clone(),
+            value: lower_expression(value),
+            span: *span,
+        },
+        lyra_ast::Statement::Assign { name, value, span } => Instruction::Assign {
             name: name.clone(),
             value: lower_expression(value),
             span: *span,
@@ -320,6 +340,21 @@ mod tests {
                 value: Some(Value::Local(name, _)),
                 ..
             } if name == "speed"
+        ));
+    }
+
+    #[test]
+    fn lowers_mutable_bindings_and_assignment() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }",
+        );
+        assert!(matches!(
+            &module.functions[0].body.instructions[0],
+            Instruction::BindMutable { name, .. } if name == "counter"
+        ));
+        assert!(matches!(
+            &module.functions[0].body.instructions[1],
+            Instruction::Assign { name, .. } if name == "counter"
         ));
     }
 
