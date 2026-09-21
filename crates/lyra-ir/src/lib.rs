@@ -37,9 +37,66 @@ pub enum Type {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockId(pub usize);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Terminator {
+    Return {
+        value: Option<Value>,
+        span: Span,
+    },
+    Jump {
+        target: BlockId,
+        span: Span,
+    },
+    Branch {
+        condition: Value,
+        then_target: BlockId,
+        else_target: BlockId,
+        span: Span,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Block {
     pub instructions: Vec<Instruction>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BasicBlock {
+    pub id: BlockId,
+    pub instructions: Vec<Instruction>,
+    pub terminator: Terminator,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ControlFlowGraph {
+    pub blocks: Vec<BasicBlock>,
+}
+
+impl ControlFlowGraph {
+    #[must_use]
+    pub fn block(&self, id: BlockId) -> Option<&BasicBlock> {
+        self.blocks.iter().find(|block| block.id == id)
+    }
+
+    #[must_use]
+    pub fn successors(&self, id: BlockId) -> Vec<BlockId> {
+        let Some(block) = self.block(id) else {
+            return Vec::new();
+        };
+
+        match &block.terminator {
+            Terminator::Return { .. } => Vec::new(),
+            Terminator::Jump { target, .. } => vec![*target],
+            Terminator::Branch {
+                then_target,
+                else_target,
+                ..
+            } => vec![*then_target, *else_target],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +292,154 @@ fn lower_statement(statement: &lyra_ast::Statement) -> Instruction {
     }
 }
 
+#[must_use]
+pub fn build_cfg(block: &Block) -> ControlFlowGraph {
+    let mut builder = CfgBuilder::default();
+    let entry = builder.new_block();
+    builder.lower_block(block, entry);
+    ControlFlowGraph {
+        blocks: builder.blocks,
+    }
+}
+
+#[derive(Default)]
+struct CfgBuilder {
+    blocks: Vec<BasicBlock>,
+}
+
+impl CfgBuilder {
+    fn new_block(&mut self) -> BlockId {
+        let id = BlockId(self.blocks.len());
+        self.blocks.push(BasicBlock {
+            id,
+            instructions: Vec::new(),
+            terminator: Terminator::Return {
+                value: None,
+                span: Span::default(),
+            },
+        });
+        id
+    }
+
+    fn set_terminator(&mut self, id: BlockId, terminator: Terminator) {
+        self.blocks[id.0].terminator = terminator;
+    }
+
+    fn lower_block(&mut self, block: &Block, mut current: BlockId) -> BlockId {
+        for instruction in &block.instructions {
+            match instruction {
+                Instruction::If {
+                    condition,
+                    then_block,
+                    else_block,
+                    span,
+                } => {
+                    let then_id = self.new_block();
+                    let else_id = self.new_block();
+                    let merge_id = self.new_block();
+                    self.set_terminator(
+                        current,
+                        Terminator::Branch {
+                            condition: condition.clone(),
+                            then_target: then_id,
+                            else_target: else_id,
+                            span: *span,
+                        },
+                    );
+                    let then_end = self.lower_block(then_block, then_id);
+                    if matches!(
+                        self.blocks[then_end.0].terminator,
+                        Terminator::Return { value: None, .. }
+                    ) {
+                        self.set_terminator(
+                            then_end,
+                            Terminator::Jump {
+                                target: merge_id,
+                                span: *span,
+                            },
+                        );
+                    }
+                    if let Some(else_block) = else_block {
+                        let else_end = self.lower_block(else_block, else_id);
+                        if matches!(
+                            self.blocks[else_end.0].terminator,
+                            Terminator::Return { value: None, .. }
+                        ) {
+                            self.set_terminator(
+                                else_end,
+                                Terminator::Jump {
+                                    target: merge_id,
+                                    span: *span,
+                                },
+                            );
+                        }
+                    } else {
+                        self.set_terminator(
+                            else_id,
+                            Terminator::Jump {
+                                target: merge_id,
+                                span: *span,
+                            },
+                        );
+                    }
+                    current = merge_id;
+                }
+                Instruction::While {
+                    condition,
+                    body,
+                    span,
+                } => {
+                    let condition_id = self.new_block();
+                    let body_id = self.new_block();
+                    let exit_id = self.new_block();
+                    self.set_terminator(
+                        current,
+                        Terminator::Jump {
+                            target: condition_id,
+                            span: *span,
+                        },
+                    );
+                    self.set_terminator(
+                        condition_id,
+                        Terminator::Branch {
+                            condition: condition.clone(),
+                            then_target: body_id,
+                            else_target: exit_id,
+                            span: *span,
+                        },
+                    );
+                    let body_end = self.lower_block(body, body_id);
+                    if matches!(
+                        self.blocks[body_end.0].terminator,
+                        Terminator::Return { value: None, .. }
+                    ) {
+                        self.set_terminator(
+                            body_end,
+                            Terminator::Jump {
+                                target: condition_id,
+                                span: *span,
+                            },
+                        );
+                    }
+                    current = exit_id;
+                }
+                Instruction::Return { value, span } => {
+                    self.set_terminator(
+                        current,
+                        Terminator::Return {
+                            value: value.clone(),
+                            span: *span,
+                        },
+                    );
+                    return current;
+                }
+                other => self.blocks[current.0].instructions.push(other.clone()),
+            }
+        }
+        current
+    }
+}
+
 fn lower_expression(expression: &lyra_ast::Expression) -> Value {
     match expression {
         lyra_ast::Expression::Integer(value, span) => Value::Integer(*value, *span),
@@ -415,6 +620,115 @@ mod tests {
                 body,
                 ..
             } if matches!(body.instructions[0], Instruction::Return { .. })
+        ));
+    }
+
+    #[test]
+    fn builds_cfg_for_if_and_while() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; while counter < 2 { if counter == 1 { return 42; } counter = counter + 1; } return 0; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+
+        assert!(cfg.blocks.len() >= 7);
+        assert!(
+            cfg.blocks
+                .iter()
+                .any(|block| matches!(block.terminator, Terminator::Branch { .. }))
+        );
+        assert!(
+            cfg.blocks
+                .iter()
+                .any(|block| matches!(block.terminator, Terminator::Jump { .. }))
+        );
+        assert!(cfg.blocks.iter().any(|block| matches!(
+            block.terminator,
+            Terminator::Return {
+                value: Some(Value::Integer(42, _)),
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn models_basic_block_successors() {
+        let span = Span { start: 0, end: 0 };
+        let cfg = ControlFlowGraph {
+            blocks: vec![
+                BasicBlock {
+                    id: BlockId(0),
+                    instructions: vec![],
+                    terminator: Terminator::Branch {
+                        condition: Value::Boolean(true, span),
+                        then_target: BlockId(1),
+                        else_target: BlockId(2),
+                        span,
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(1),
+                    instructions: vec![],
+                    terminator: Terminator::Jump {
+                        target: BlockId(2),
+                        span,
+                    },
+                },
+                BasicBlock {
+                    id: BlockId(2),
+                    instructions: vec![],
+                    terminator: Terminator::Return {
+                        value: Some(Value::Integer(42, span)),
+                        span,
+                    },
+                },
+            ],
+        };
+
+        assert_eq!(cfg.successors(BlockId(0)), vec![BlockId(1), BlockId(2)]);
+        assert_eq!(cfg.successors(BlockId(1)), vec![BlockId(2)]);
+        assert!(cfg.successors(BlockId(2)).is_empty());
+        assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn models_explicit_control_flow_terminators() {
+        let span = Span { start: 0, end: 0 };
+        let branch = Terminator::Branch {
+            condition: Value::Boolean(true, span),
+            then_target: BlockId(1),
+            else_target: BlockId(2),
+            span,
+        };
+        let jump = Terminator::Jump {
+            target: BlockId(3),
+            span,
+        };
+        let ret = Terminator::Return {
+            value: Some(Value::Integer(42, span)),
+            span,
+        };
+
+        assert!(matches!(
+            branch,
+            Terminator::Branch {
+                then_target: BlockId(1),
+                else_target: BlockId(2),
+                ..
+            }
+        ));
+        assert!(matches!(
+            jump,
+            Terminator::Jump {
+                target: BlockId(3),
+                ..
+            }
+        ));
+        assert!(matches!(
+            ret,
+            Terminator::Return {
+                value: Some(Value::Integer(42, _)),
+                ..
+            }
         ));
     }
 
