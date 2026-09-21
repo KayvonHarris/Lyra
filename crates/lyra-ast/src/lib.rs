@@ -47,6 +47,16 @@ pub enum Statement {
         value: Expression,
         span: Span,
     },
+    Var {
+        name: String,
+        value: Expression,
+        span: Span,
+    },
+    Assign {
+        name: String,
+        value: Expression,
+        span: Span,
+    },
     Return {
         value: Option<Expression>,
         span: Span,

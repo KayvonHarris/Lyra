@@ -123,3 +123,14 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 42
+
+      - name: Build and execute stateful native Lyra while loop
+        if: steps.packages.outputs.has_packages == 'true'
+        shell: bash
+        run: |
+          target/release/lyra build examples/mutable_while.ly -o /tmp/lyra-mutable-while
+          set +e
+          /tmp/lyra-mutable-while
+          code=$?
+          set -e
+          test "$code" -eq 42

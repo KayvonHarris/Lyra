@@ -51,6 +51,22 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                     let operand = emitter.emit_value(value, &mut body)?;
                     emitter.locals.insert(name.clone(), operand);
                 }
+                Instruction::BindMutable { name, value, .. } => {
+                    let operand = emitter.emit_value(value, &mut body)?;
+                    let slot = format!("%{name}.addr");
+                    body.push_str(&format!("  {slot} = alloca i64\n"));
+                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                    emitter.mutable_locals.insert(name.clone(), slot);
+                }
+                Instruction::Assign { name, value, .. } => {
+                    let operand = emitter.emit_value(value, &mut body)?;
+                    let slot = emitter
+                        .mutable_locals
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
+                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                }
                 Instruction::Evaluate { value, .. } => {
                     let _ = emitter.emit_value(value, &mut body)?;
                 }
@@ -155,6 +171,7 @@ struct FunctionEmitter<'a> {
     next_register: usize,
     next_block: usize,
     locals: HashMap<String, String>,
+    mutable_locals: HashMap<String, String>,
     signatures: &'a HashMap<String, Type>,
 }
 
@@ -164,6 +181,7 @@ impl<'a> FunctionEmitter<'a> {
             next_register: 0,
             next_block: 0,
             locals: HashMap::new(),
+            mutable_locals: HashMap::new(),
             signatures,
         }
     }
@@ -205,6 +223,22 @@ impl<'a> FunctionEmitter<'a> {
                 Instruction::Bind { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     self.locals.insert(name.clone(), operand);
+                }
+                Instruction::BindMutable { name, value, .. } => {
+                    let operand = self.emit_value(value, body)?;
+                    let slot = format!("%{name}.addr");
+                    body.push_str(&format!("  {slot} = alloca i64\n"));
+                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                    self.mutable_locals.insert(name.clone(), slot);
+                }
+                Instruction::Assign { name, value, .. } => {
+                    let operand = self.emit_value(value, body)?;
+                    let slot = self
+                        .mutable_locals
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
+                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
                 }
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
@@ -317,11 +351,18 @@ impl<'a> FunctionEmitter<'a> {
         match value {
             Value::Integer(value, _) => Ok(value.to_string()),
             Value::Boolean(value, _) => Ok(i64::from(*value).to_string()),
-            Value::Local(name, _) => self
-                .locals
-                .get(name)
-                .cloned()
-                .ok_or_else(|| CodegenError::UnknownLocal(name.clone())),
+            Value::Local(name, _) => {
+                if let Some(slot) = self.mutable_locals.get(name).cloned() {
+                    let register = self.register();
+                    body.push_str(&format!("  {register} = load i64, ptr {slot}\n"));
+                    Ok(register)
+                } else {
+                    self.locals
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))
+                }
+            }
             Value::Call {
                 callee, arguments, ..
             } => {
@@ -603,6 +644,48 @@ mod tests {
         assert!(llvm.contains("while.end."));
         assert!(llvm.contains("br i1"));
         assert!(llvm.contains("ret i32 42"));
+    }
+
+    #[test]
+    fn emits_mutable_local_storage_and_updates() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::Assign {
+                            name: "counter".into(),
+                            value: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Add,
+                                right: Box::new(Value::Integer(1, span)),
+                                span,
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("counter".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("mutable local should lower");
+        assert!(llvm.contains("%counter.addr = alloca i64"));
+        assert!(llvm.contains("store i64 0, ptr %counter.addr"));
+        assert!(llvm.contains("load i64, ptr %counter.addr"));
+        assert!(llvm.contains("store i64 %"));
     }
 
     #[test]

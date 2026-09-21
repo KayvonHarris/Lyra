@@ -133,6 +133,28 @@ impl<'a> Parser<'a> {
         if self.matches(|kind| matches!(kind, TokenKind::Let)) {
             return self.parse_let_statement();
         }
+        if self.matches(|kind| matches!(kind, TokenKind::Var)) {
+            return self.parse_var_statement();
+        }
+        if matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self
+                .tokens
+                .get(self.current + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Equal))
+        {
+            return self.parse_assignment_statement();
+        }
+        if self.matches(|kind| matches!(kind, TokenKind::Var)) {
+            return self.parse_var_statement();
+        }
+        if matches!(self.peek().kind, TokenKind::Identifier(_))
+            && self
+                .tokens
+                .get(self.current + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Equal))
+        {
+            return self.parse_assignment_statement();
+        }
         if self.matches(|kind| matches!(kind, TokenKind::Return)) {
             return self.parse_return_statement();
         }
@@ -169,6 +191,46 @@ impl<'a> Parser<'a> {
         )?;
 
         Some(Statement::Let {
+            name,
+            value,
+            span: Span::new(start, semicolon.span.end),
+        })
+    }
+
+    fn parse_var_statement(&mut self) -> Option<Statement> {
+        let start = self.previous().span.start;
+        let name = self.expect_identifier("expected variable name after `var`")?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::Equal),
+            "expected `=` after variable name",
+        )?;
+        let value = self.parse_expression()?;
+        let semicolon = self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "expected `;` after var statement",
+        )?;
+
+        Some(Statement::Var {
+            name,
+            value,
+            span: Span::new(start, semicolon.span.end),
+        })
+    }
+
+    fn parse_assignment_statement(&mut self) -> Option<Statement> {
+        let start = self.peek().span.start;
+        let name = self.expect_identifier("expected assignment target")?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::Equal),
+            "expected `=` after assignment target",
+        )?;
+        let value = self.parse_expression()?;
+        let semicolon = self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "expected `;` after assignment",
+        )?;
+
+        Some(Statement::Assign {
             name,
             value,
             span: Span::new(start, semicolon.span.end),
@@ -500,6 +562,24 @@ mod tests {
                 value: Some(Expression::Call { callee, arguments, .. }),
                 ..
             } if callee == "add" && arguments.len() == 2
+        ));
+    }
+
+    #[test]
+    fn parses_mutable_variable_and_assignment() {
+        let (module, diagnostics) = parse_source(
+            "fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }",
+        );
+        assert!(diagnostics.is_empty());
+
+        let Item::Function(main) = &module.items[0];
+        assert!(matches!(
+            &main.body.statements[0],
+            Statement::Var { name, .. } if name == "counter"
+        ));
+        assert!(matches!(
+            &main.body.statements[1],
+            Statement::Assign { name, .. } if name == "counter"
         ));
     }
 
