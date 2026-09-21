@@ -607,25 +607,9 @@ mod tests {
 
     #[test]
     fn parses_mutable_variable_and_assignment() {
-        let (module, diagnostics) =
-            parse_source("fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }");
-        assert!(diagnostics.is_empty());
-
-        let Item::Function(main) = &module.items[0];
-        assert!(matches!(
-            &main.body.statements[0],
-            Statement::Var { name, .. } if name == "counter"
-        ));
-        assert!(matches!(
-            &main.body.statements[1],
-            Statement::Assign { name, .. } if name == "counter"
-        ));
-    }
-
-    #[test]
-    fn parses_mutable_variable_and_assignment() {
-        let (module, diagnostics) =
-            parse_source("fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }");
+        let (module, diagnostics) = parse_source(
+            "fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }",
+        );
         assert!(diagnostics.is_empty());
 
         let Item::Function(main) = &module.items[0];
