@@ -292,6 +292,115 @@ fn lower_statement(statement: &lyra_ast::Statement) -> Instruction {
     }
 }
 
+#[must_use]
+pub fn build_cfg(block: &Block) -> ControlFlowGraph {
+    let mut builder = CfgBuilder::default();
+    let entry = builder.new_block();
+    builder.lower_block(block, entry);
+    ControlFlowGraph {
+        blocks: builder.blocks,
+    }
+}
+
+#[derive(Default)]
+struct CfgBuilder {
+    blocks: Vec<BasicBlock>,
+}
+
+impl CfgBuilder {
+    fn new_block(&mut self) -> BlockId {
+        let id = BlockId(self.blocks.len());
+        self.blocks.push(BasicBlock {
+            id,
+            instructions: Vec::new(),
+            terminator: Terminator::Return {
+                value: None,
+                span: Span::default(),
+            },
+        });
+        id
+    }
+
+    fn set_terminator(&mut self, id: BlockId, terminator: Terminator) {
+        self.blocks[id.0].terminator = terminator;
+    }
+
+    fn lower_block(&mut self, block: &Block, mut current: BlockId) -> BlockId {
+        for instruction in &block.instructions {
+            match instruction {
+                Instruction::If {
+                    condition,
+                    then_block,
+                    else_block,
+                    span,
+                } => {
+                    let then_id = self.new_block();
+                    let else_id = self.new_block();
+                    let merge_id = self.new_block();
+                    self.set_terminator(
+                        current,
+                        Terminator::Branch {
+                            condition: condition.clone(),
+                            then_target: then_id,
+                            else_target: else_id,
+                            span: *span,
+                        },
+                    );
+                    let then_end = self.lower_block(then_block, then_id);
+                    if matches!(self.blocks[then_end.0].terminator, Terminator::Return { value: None, .. }) {
+                        self.set_terminator(then_end, Terminator::Jump { target: merge_id, span: *span });
+                    }
+                    if let Some(else_block) = else_block {
+                        let else_end = self.lower_block(else_block, else_id);
+                        if matches!(self.blocks[else_end.0].terminator, Terminator::Return { value: None, .. }) {
+                            self.set_terminator(else_end, Terminator::Jump { target: merge_id, span: *span });
+                        }
+                    } else {
+                        self.set_terminator(else_id, Terminator::Jump { target: merge_id, span: *span });
+                    }
+                    current = merge_id;
+                }
+                Instruction::While {
+                    condition,
+                    body,
+                    span,
+                } => {
+                    let condition_id = self.new_block();
+                    let body_id = self.new_block();
+                    let exit_id = self.new_block();
+                    self.set_terminator(current, Terminator::Jump { target: condition_id, span: *span });
+                    self.set_terminator(
+                        condition_id,
+                        Terminator::Branch {
+                            condition: condition.clone(),
+                            then_target: body_id,
+                            else_target: exit_id,
+                            span: *span,
+                        },
+                    );
+                    let body_end = self.lower_block(body, body_id);
+                    if matches!(self.blocks[body_end.0].terminator, Terminator::Return { value: None, .. }) {
+                        self.set_terminator(body_end, Terminator::Jump { target: condition_id, span: *span });
+                    }
+                    current = exit_id;
+                }
+                Instruction::Return { value, span } => {
+                    self.set_terminator(
+                        current,
+                        Terminator::Return {
+                            value: value.clone(),
+                            span: *span,
+                        },
+                    );
+                    return current;
+                }
+                other => self.blocks[current.0].instructions.push(other.clone()),
+            }
+        }
+        current
+    }
+}
+
 fn lower_expression(expression: &lyra_ast::Expression) -> Value {
     match expression {
         lyra_ast::Expression::Integer(value, span) => Value::Integer(*value, *span),
@@ -473,6 +582,31 @@ mod tests {
                 ..
             } if matches!(body.instructions[0], Instruction::Return { .. })
         ));
+    }
+
+    #[test]
+    fn builds_cfg_for_if_and_while() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; while counter < 2 { if counter == 1 { return 42; } counter = counter + 1; } return 0; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+
+        assert!(cfg.blocks.len() >= 7);
+        assert!(cfg.blocks.iter().any(|block| matches!(
+            block.terminator,
+            Terminator::Branch { .. }
+        )));
+        assert!(cfg.blocks.iter().any(|block| matches!(
+            block.terminator,
+            Terminator::Jump { .. }
+        )));
+        assert!(cfg.blocks.iter().any(|block| matches!(
+            block.terminator,
+            Terminator::Return {
+                value: Some(Value::Integer(42, _)),
+                ..
+            }
+        )));
     }
 
     #[test]
