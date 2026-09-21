@@ -72,6 +72,13 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                         &mut body,
                     )?;
                 }
+                Instruction::While {
+                    condition,
+                    body: loop_body,
+                    ..
+                } => {
+                    emitter.emit_while(condition, loop_body, function.return_type, &mut body)?;
+                }
             }
         }
 
@@ -222,6 +229,13 @@ impl<'a> FunctionEmitter<'a> {
                         return Ok(true);
                     }
                 }
+                Instruction::While {
+                    condition,
+                    body: loop_body,
+                    ..
+                } => {
+                    self.emit_while(condition, loop_body, return_type, body)?;
+                }
             }
         }
         Ok(false)
@@ -267,6 +281,36 @@ impl<'a> FunctionEmitter<'a> {
             body.push_str(&format!("\n{merge_label}:\n"));
             Ok(false)
         }
+    }
+
+    fn emit_while(
+        &mut self,
+        condition: &Value,
+        loop_body: &lyra_ir::Block,
+        return_type: Type,
+        body: &mut String,
+    ) -> Result<(), CodegenError> {
+        let condition_label = self.block_label("while.cond");
+        let body_label = self.block_label("while.body");
+        let exit_label = self.block_label("while.end");
+
+        body.push_str(&format!(
+            "  br label %{condition_label}\n\n{condition_label}:\n"
+        ));
+        let condition = self.emit_value(condition, body)?;
+        let condition_i1 = self.register();
+        body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
+        body.push_str(&format!(
+            "  br i1 {condition_i1}, label %{body_label}, label %{exit_label}\n\n{body_label}:\n"
+        ));
+
+        let body_terminated = self.emit_block(loop_body, return_type, body)?;
+        if !body_terminated {
+            body.push_str(&format!("  br label %{condition_label}\n"));
+        }
+
+        body.push_str(&format!("\n{exit_label}:\n"));
+        Ok(())
     }
 
     fn emit_value(&mut self, value: &Value, body: &mut String) -> Result<String, CodegenError> {
@@ -521,6 +565,44 @@ mod tests {
         assert!(llvm.contains("if.else."));
         assert!(llvm.contains("ret i32 42"));
         assert!(llvm.contains("ret i32 0"));
+    }
+
+    #[test]
+    fn emits_while_basic_blocks() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::While {
+                            condition: Value::Boolean(false, span),
+                            body: Block {
+                                instructions: vec![Instruction::Evaluate {
+                                    value: Value::Integer(1, span),
+                                    span,
+                                }],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Integer(42, span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("while loop should lower");
+        assert!(llvm.contains("while.cond."));
+        assert!(llvm.contains("while.body."));
+        assert!(llvm.contains("while.end."));
+        assert!(llvm.contains("br i1"));
+        assert!(llvm.contains("ret i32 42"));
     }
 
     #[test]

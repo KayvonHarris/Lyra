@@ -63,6 +63,11 @@ pub enum Instruction {
         else_block: Option<Block>,
         span: Span,
     },
+    While {
+        condition: Value,
+        body: Block,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +197,15 @@ fn lower_statement(statement: &lyra_ast::Statement) -> Instruction {
             condition: lower_expression(condition),
             then_block: lower_block(then_block),
             else_block: else_block.as_ref().map(lower_block),
+            span: *span,
+        },
+        lyra_ast::Statement::While {
+            condition,
+            body,
+            span,
+        } => Instruction::While {
+            condition: lower_expression(condition),
+            body: lower_block(body),
             span: *span,
         },
         lyra_ast::Statement::Expression { expression, span } => Instruction::Evaluate {
@@ -353,6 +367,19 @@ mod tests {
                 ..
             } if matches!(then_block.instructions[0], Instruction::Return { .. })
                 && matches!(else_block.instructions[0], Instruction::Return { .. })
+        ));
+    }
+
+    #[test]
+    fn lowers_while_control_flow() {
+        let module = lower_source("fn main() -> Int { while true { return 42; } return 0; }");
+        assert!(matches!(
+            &module.functions[0].body.instructions[0],
+            Instruction::While {
+                condition: Value::Boolean(true, _),
+                body,
+                ..
+            } if matches!(body.instructions[0], Instruction::Return { .. })
         ));
     }
 

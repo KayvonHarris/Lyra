@@ -57,6 +57,11 @@ pub enum Statement {
         else_block: Option<Block>,
         span: Span,
     },
+    While {
+        condition: Expression,
+        body: Block,
+        span: Span,
+    },
     Expression {
         expression: Expression,
         span: Span,

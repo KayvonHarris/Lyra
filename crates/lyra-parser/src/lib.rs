@@ -139,6 +139,9 @@ impl<'a> Parser<'a> {
         if self.matches(|kind| matches!(kind, TokenKind::If)) {
             return self.parse_if_statement();
         }
+        if self.matches(|kind| matches!(kind, TokenKind::While)) {
+            return self.parse_while_statement();
+        }
 
         let expression = self.parse_expression()?;
         let start = expression.span().start;
@@ -207,6 +210,19 @@ impl<'a> Parser<'a> {
             condition,
             then_block,
             else_block,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn parse_while_statement(&mut self) -> Option<Statement> {
+        let start = self.previous().span.start;
+        let condition = self.parse_expression()?;
+        let body = self.parse_block()?;
+        let end = body.span.end;
+
+        Some(Statement::While {
+            condition,
+            body,
             span: Span::new(start, end),
         })
     }
@@ -484,6 +500,23 @@ mod tests {
                 value: Some(Expression::Call { callee, arguments, .. }),
                 ..
             } if callee == "add" && arguments.len() == 2
+        ));
+    }
+
+    #[test]
+    fn parses_while_statement() {
+        let (module, diagnostics) =
+            parse_source("fn main() -> Int { while true { return 42; } return 0; }");
+        assert!(diagnostics.is_empty());
+
+        let Item::Function(main) = &module.items[0];
+        assert!(matches!(
+            &main.body.statements[0],
+            Statement::While {
+                condition: Expression::Boolean(true, _),
+                body,
+                ..
+            } if matches!(body.statements[0], Statement::Return { .. })
         ));
     }
 

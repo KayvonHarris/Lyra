@@ -112,3 +112,14 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 42
+
+      - name: Build and execute native Lyra while loop
+        if: steps.packages.outputs.has_packages == 'true'
+        shell: bash
+        run: |
+          target/release/lyra build examples/while_loop.ly -o /tmp/lyra-while-loop
+          set +e
+          /tmp/lyra-while-loop
+          code=$?
+          set -e
+          test "$code" -eq 42
