@@ -225,22 +225,6 @@ impl<'a> FunctionEmitter<'a> {
                     self.locals.insert(name.clone(), operand);
                 }
                 Instruction::BindMutable { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    let slot = format!("%{name}.addr");
-                    body.push_str(&format!("  {slot} = alloca i64\n"));
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                    emitter.mutable_locals.insert(name.clone(), slot);
-                }
-                Instruction::Assign { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    let slot = emitter
-                        .mutable_locals
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                }
-                Instruction::BindMutable { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let slot = format!("%{name}.addr");
                     body.push_str(&format!("  {slot} = alloca i64\n"));
@@ -378,7 +362,7 @@ impl<'a> FunctionEmitter<'a> {
                         .cloned()
                         .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))
                 }
-            },
+            }
             Value::Call {
                 callee, arguments, ..
             } => {
