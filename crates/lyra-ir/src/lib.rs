@@ -347,16 +347,40 @@ impl CfgBuilder {
                         },
                     );
                     let then_end = self.lower_block(then_block, then_id);
-                    if matches!(self.blocks[then_end.0].terminator, Terminator::Return { value: None, .. }) {
-                        self.set_terminator(then_end, Terminator::Jump { target: merge_id, span: *span });
+                    if matches!(
+                        self.blocks[then_end.0].terminator,
+                        Terminator::Return { value: None, .. }
+                    ) {
+                        self.set_terminator(
+                            then_end,
+                            Terminator::Jump {
+                                target: merge_id,
+                                span: *span,
+                            },
+                        );
                     }
                     if let Some(else_block) = else_block {
                         let else_end = self.lower_block(else_block, else_id);
-                        if matches!(self.blocks[else_end.0].terminator, Terminator::Return { value: None, .. }) {
-                            self.set_terminator(else_end, Terminator::Jump { target: merge_id, span: *span });
+                        if matches!(
+                            self.blocks[else_end.0].terminator,
+                            Terminator::Return { value: None, .. }
+                        ) {
+                            self.set_terminator(
+                                else_end,
+                                Terminator::Jump {
+                                    target: merge_id,
+                                    span: *span,
+                                },
+                            );
                         }
                     } else {
-                        self.set_terminator(else_id, Terminator::Jump { target: merge_id, span: *span });
+                        self.set_terminator(
+                            else_id,
+                            Terminator::Jump {
+                                target: merge_id,
+                                span: *span,
+                            },
+                        );
                     }
                     current = merge_id;
                 }
@@ -368,7 +392,13 @@ impl CfgBuilder {
                     let condition_id = self.new_block();
                     let body_id = self.new_block();
                     let exit_id = self.new_block();
-                    self.set_terminator(current, Terminator::Jump { target: condition_id, span: *span });
+                    self.set_terminator(
+                        current,
+                        Terminator::Jump {
+                            target: condition_id,
+                            span: *span,
+                        },
+                    );
                     self.set_terminator(
                         condition_id,
                         Terminator::Branch {
@@ -379,8 +409,17 @@ impl CfgBuilder {
                         },
                     );
                     let body_end = self.lower_block(body, body_id);
-                    if matches!(self.blocks[body_end.0].terminator, Terminator::Return { value: None, .. }) {
-                        self.set_terminator(body_end, Terminator::Jump { target: condition_id, span: *span });
+                    if matches!(
+                        self.blocks[body_end.0].terminator,
+                        Terminator::Return { value: None, .. }
+                    ) {
+                        self.set_terminator(
+                            body_end,
+                            Terminator::Jump {
+                                target: condition_id,
+                                span: *span,
+                            },
+                        );
                     }
                     current = exit_id;
                 }
@@ -592,14 +631,16 @@ mod tests {
         let cfg = build_cfg(&module.functions[0].body);
 
         assert!(cfg.blocks.len() >= 7);
-        assert!(cfg.blocks.iter().any(|block| matches!(
-            block.terminator,
-            Terminator::Branch { .. }
-        )));
-        assert!(cfg.blocks.iter().any(|block| matches!(
-            block.terminator,
-            Terminator::Jump { .. }
-        )));
+        assert!(
+            cfg.blocks
+                .iter()
+                .any(|block| matches!(block.terminator, Terminator::Branch { .. }))
+        );
+        assert!(
+            cfg.blocks
+                .iter()
+                .any(|block| matches!(block.terminator, Terminator::Jump { .. }))
+        );
         assert!(cfg.blocks.iter().any(|block| matches!(
             block.terminator,
             Terminator::Return {
