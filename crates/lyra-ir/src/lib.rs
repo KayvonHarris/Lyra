@@ -716,7 +716,13 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(jump, Terminator::Jump { target: BlockId(3), .. }));
+        assert!(matches!(
+            jump,
+            Terminator::Jump {
+                target: BlockId(3),
+                ..
+            }
+        ));
         assert!(matches!(
             ret,
             Terminator::Return {
