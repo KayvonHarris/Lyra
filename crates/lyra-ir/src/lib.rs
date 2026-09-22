@@ -363,6 +363,7 @@ pub fn build_cfg(block: &Block) -> ControlFlowGraph {
     let mut builder = CfgBuilder::default();
     let entry = builder.new_block();
     builder.lower_block(block, entry);
+    builder.insert_phi_nodes();
     ControlFlowGraph {
         blocks: builder.blocks,
     }
@@ -400,6 +401,67 @@ impl CfgBuilder {
 
     fn is_terminated(&self, id: BlockId) -> bool {
         self.terminated[id.0]
+    }
+
+    fn insert_phi_nodes(&mut self) {
+        let block_ids: Vec<BlockId> = self.blocks.iter().map(|block| block.id).collect();
+
+        for block_id in block_ids {
+            let predecessors = self.predecessors_of(block_id);
+            if predecessors.len() < 2 {
+                continue;
+            }
+
+            let mut incoming_by_name: HashMap<String, Vec<(BlockId, ValueId)>> = HashMap::new();
+            for predecessor in predecessors {
+                for (name, id) in self.definitions_reaching_end(predecessor) {
+                    incoming_by_name
+                        .entry(name)
+                        .or_default()
+                        .push((predecessor, id));
+                }
+            }
+
+            let mut names: Vec<String> = incoming_by_name.keys().cloned().collect();
+            names.sort();
+            for name in names {
+                let incoming = incoming_by_name.remove(&name).unwrap_or_default();
+                if incoming.len() < 2 {
+                    continue;
+                }
+                let first = incoming[0].1;
+                if incoming.iter().all(|(_, id)| *id == first) {
+                    continue;
+                }
+
+                let id = ValueId(self.next_value);
+                self.next_value += 1;
+                self.blocks[block_id.0].phi_nodes.push(PhiNode { id, name, incoming });
+            }
+        }
+    }
+
+    fn predecessors_of(&self, id: BlockId) -> Vec<BlockId> {
+        self.blocks
+            .iter()
+            .filter(|block| terminator_targets(&block.terminator).contains(&id))
+            .map(|block| block.id)
+            .collect()
+    }
+
+    fn definitions_reaching_end(&self, id: BlockId) -> HashMap<String, ValueId> {
+        let mut definitions = HashMap::new();
+        for definition in &self.blocks[id.0].definitions {
+            if let Some(instruction) = self.blocks[id.0]
+                .instructions
+                .get(definition.instruction_index)
+            {
+                if let Some(name) = defined_name(instruction) {
+                    definitions.insert(name.to_owned(), definition.id);
+                }
+            }
+        }
+        definitions
     }
 
     fn instruction_uses(&self, instruction: &Instruction) -> Vec<ValueId> {
@@ -560,6 +622,18 @@ impl CfgBuilder {
             }
         }
         current
+    }
+}
+
+fn terminator_targets(terminator: &Terminator) -> Vec<BlockId> {
+    match terminator {
+        Terminator::Return { .. } => Vec::new(),
+        Terminator::Jump { target, .. } => vec![*target],
+        Terminator::Branch {
+            then_target,
+            else_target,
+            ..
+        } => vec![*then_target, *else_target],
     }
 }
 
@@ -832,6 +906,27 @@ mod tests {
         assert_eq!(cfg.predecessors(BlockId(1)), vec![BlockId(0)]);
         assert_eq!(cfg.predecessors(BlockId(2)), vec![BlockId(0), BlockId(1)]);
         assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn inserts_phi_for_distinct_branch_definitions() {
+        let module = lower_source(
+            "fn main() -> Int { var value = 0; if true { value = 20; } else { value = 22; } return value; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let merge = cfg
+            .blocks
+            .iter()
+            .find(|block| block.phi_nodes.iter().any(|phi| phi.name == "value"))
+            .expect("merge block with value phi");
+        let phi = merge
+            .phi_nodes
+            .iter()
+            .find(|phi| phi.name == "value")
+            .expect("value phi");
+
+        assert_eq!(phi.incoming.len(), 2);
+        assert_ne!(phi.incoming[0].1, phi.incoming[1].1);
     }
 
     #[test]
