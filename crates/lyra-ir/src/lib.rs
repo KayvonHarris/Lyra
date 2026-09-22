@@ -40,6 +40,45 @@ pub enum Type {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ValueId(pub usize);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SsaValue {
+    pub id: ValueId,
+    pub ty: Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ValueTable {
+    values: Vec<SsaValue>,
+}
+
+impl ValueTable {
+    #[must_use]
+    pub fn allocate(&mut self, ty: Type, span: Span) -> ValueId {
+        let id = ValueId(self.values.len());
+        self.values.push(SsaValue { id, ty, span });
+        id
+    }
+
+    #[must_use]
+    pub fn get(&self, id: ValueId) -> Option<&SsaValue> {
+        self.values.get(id.0)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Terminator {
     Return {
@@ -686,6 +725,22 @@ mod tests {
         assert_eq!(cfg.successors(BlockId(1)), vec![BlockId(2)]);
         assert!(cfg.successors(BlockId(2)).is_empty());
         assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn allocates_stable_ssa_value_ids() {
+        let span = Span { start: 4, end: 9 };
+        let mut values = ValueTable::default();
+
+        let first = values.allocate(Type::Integer, span);
+        let second = values.allocate(Type::Boolean, span);
+
+        assert_eq!(first, ValueId(0));
+        assert_eq!(second, ValueId(1));
+        assert_eq!(values.len(), 2);
+        assert_eq!(values.get(first).map(|value| value.ty), Some(Type::Integer));
+        assert_eq!(values.get(second).map(|value| value.ty), Some(Type::Boolean));
+        assert!(values.get(ValueId(99)).is_none());
     }
 
     #[test]
