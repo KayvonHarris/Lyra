@@ -112,11 +112,19 @@ pub struct ValueDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PhiNode {
+    pub id: ValueId,
+    pub name: String,
+    pub incoming: Vec<(BlockId, ValueId)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BasicBlock {
     pub id: BlockId,
     pub instructions: Vec<Instruction>,
     pub terminator: Terminator,
     pub definitions: Vec<ValueDefinition>,
+    pub phi_nodes: Vec<PhiNode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -128,6 +136,15 @@ impl ControlFlowGraph {
     #[must_use]
     pub fn block(&self, id: BlockId) -> Option<&BasicBlock> {
         self.blocks.iter().find(|block| block.id == id)
+    }
+
+    #[must_use]
+    pub fn predecessors(&self, id: BlockId) -> Vec<BlockId> {
+        self.blocks
+            .iter()
+            .filter(|block| self.successors(block.id).contains(&id))
+            .map(|block| block.id)
+            .collect()
     }
 
     #[must_use]
@@ -370,6 +387,7 @@ impl CfgBuilder {
                 span: Span::default(),
             },
             definitions: Vec::new(),
+            phi_nodes: Vec::new(),
         });
         self.terminated.push(false);
         id
@@ -782,6 +800,7 @@ mod tests {
                         span,
                     },
                     definitions: vec![],
+                    phi_nodes: vec![],
                 },
                 BasicBlock {
                     id: BlockId(1),
@@ -791,6 +810,7 @@ mod tests {
                         span,
                     },
                     definitions: vec![],
+                    phi_nodes: vec![],
                 },
                 BasicBlock {
                     id: BlockId(2),
@@ -800,6 +820,7 @@ mod tests {
                         span,
                     },
                     definitions: vec![],
+                    phi_nodes: vec![],
                 },
             ],
         };
@@ -807,7 +828,25 @@ mod tests {
         assert_eq!(cfg.successors(BlockId(0)), vec![BlockId(1), BlockId(2)]);
         assert_eq!(cfg.successors(BlockId(1)), vec![BlockId(2)]);
         assert!(cfg.successors(BlockId(2)).is_empty());
+        assert!(cfg.predecessors(BlockId(0)).is_empty());
+        assert_eq!(cfg.predecessors(BlockId(1)), vec![BlockId(0)]);
+        assert_eq!(cfg.predecessors(BlockId(2)), vec![BlockId(0), BlockId(1)]);
         assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn basic_blocks_can_record_phi_nodes() {
+        let phi = PhiNode {
+            id: ValueId(4),
+            name: "counter".to_owned(),
+            incoming: vec![(BlockId(1), ValueId(2)), (BlockId(2), ValueId(3))],
+        };
+
+        assert_eq!(phi.id, ValueId(4));
+        assert_eq!(phi.name, "counter");
+        assert_eq!(phi.incoming.len(), 2);
+        assert_eq!(phi.incoming[0], (BlockId(1), ValueId(2)));
+        assert_eq!(phi.incoming[1], (BlockId(2), ValueId(3)));
     }
 
     #[test]
