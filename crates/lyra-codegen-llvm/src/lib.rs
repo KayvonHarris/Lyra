@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use lyra_ir::{build_cfg, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value};
+use lyra_ir::{
+    BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value, build_cfg,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodegenError {
@@ -42,7 +44,9 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         for block in &cfg.blocks {
             for successor in cfg.successors(block.id) {
                 if cfg.block(successor).is_none() {
-                    return Err(CodegenError::Unsupported("CFG successor references missing block"));
+                    return Err(CodegenError::Unsupported(
+                        "CFG successor references missing block",
+                    ));
                 }
             }
 
