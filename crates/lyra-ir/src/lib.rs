@@ -486,12 +486,25 @@ impl CfgBuilder {
             }
 
             let mut incoming_by_name: HashMap<String, Vec<(BlockId, ValueId)>> = HashMap::new();
-            for predecessor in predecessors {
-                for (name, id) in self.definitions_reaching_end(predecessor) {
+            for predecessor in &predecessors {
+                for (name, id) in self.definitions_reaching_end(*predecessor) {
                     incoming_by_name
                         .entry(name)
                         .or_default()
-                        .push((predecessor, id));
+                        .push((*predecessor, id));
+                }
+            }
+
+            // Loop headers need the preheader definition even when the back-edge
+            // definition lives in the loop body. Seed missing incoming values by
+            // walking backwards through single-predecessor chains.
+            for predecessor in &predecessors {
+                let inherited = self.inherited_definitions(*predecessor);
+                for (name, id) in inherited {
+                    let incoming = incoming_by_name.entry(name).or_default();
+                    if !incoming.iter().any(|(block, _)| block == predecessor) {
+                        incoming.push((*predecessor, id));
+                    }
                 }
             }
 
@@ -499,7 +512,7 @@ impl CfgBuilder {
             names.sort();
             for name in names {
                 let incoming = incoming_by_name.remove(&name).unwrap_or_default();
-                if incoming.len() < 2 {
+                if incoming.len() != predecessors.len() {
                     continue;
                 }
                 let first = incoming[0].1;
@@ -512,6 +525,23 @@ impl CfgBuilder {
                 self.blocks[block_id.0].phi_nodes.push(PhiNode { id, name, incoming });
             }
         }
+    }
+
+    fn inherited_definitions(&self, mut block: BlockId) -> HashMap<String, ValueId> {
+        let mut definitions = self.definitions_reaching_end(block);
+        let mut visited = vec![block];
+
+        while definitions.is_empty() {
+            let predecessors = self.predecessors_of(block);
+            if predecessors.len() != 1 || visited.contains(&predecessors[0]) {
+                break;
+            }
+            block = predecessors[0];
+            visited.push(block);
+            definitions = self.definitions_reaching_end(block);
+        }
+
+        definitions
     }
 
     fn predecessors_of(&self, id: BlockId) -> Vec<BlockId> {
@@ -981,6 +1011,31 @@ mod tests {
         assert_eq!(cfg.predecessors(BlockId(1)), vec![BlockId(0)]);
         assert_eq!(cfg.predecessors(BlockId(2)), vec![BlockId(0), BlockId(1)]);
         assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn inserts_phi_for_loop_carried_mutable_value() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; while counter < 2 { counter = counter + 1; } return counter; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let loop_header = cfg
+            .blocks
+            .iter()
+            .find(|block| {
+                matches!(block.terminator, Terminator::Branch { .. })
+                    && cfg.predecessors(block.id).len() == 2
+            })
+            .expect("loop header");
+        let phi = loop_header
+            .phi_nodes
+            .iter()
+            .find(|phi| phi.name == "counter")
+            .expect("loop-carried counter phi");
+
+        assert_eq!(phi.incoming.len(), 2);
+        assert_ne!(phi.incoming[0].1, phi.incoming[1].1);
+        assert_eq!(cfg.definition_at_entry(loop_header.id, "counter"), Some(phi.id));
     }
 
     #[test]
