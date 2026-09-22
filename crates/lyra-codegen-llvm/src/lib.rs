@@ -31,8 +31,6 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             .iter()
             .map(|parameter| Ok(format!("{} %{}", llvm_type(parameter.ty)?, parameter.name)))
             .collect::<Result<Vec<_>, CodegenError>>()?
-            .into_iter()
-            .collect::<Vec<_>>()
             .join(", ");
         for parameter in &function.parameters {
             emitter
@@ -41,84 +39,18 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         }
 
         let cfg = build_cfg(&function.body);
-        let mut terminated = false;
-        for instruction in &function.body.instructions {
-            if terminated {
-                break;
-            }
-
-            match instruction {
-                Instruction::Bind { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    emitter.locals.insert(name.clone(), operand);
-                }
-                Instruction::BindMutable { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    let slot = format!("%{name}.addr");
-                    body.push_str(&format!("  {slot} = alloca i64\n"));
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                    emitter.mutable_locals.insert(name.clone(), slot);
-                }
-                Instruction::Assign { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    let slot = emitter
-                        .mutable_locals
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                }
-                Instruction::Evaluate { value, .. } => {
-                    let _ = emitter.emit_value(value, &mut body)?;
-                }
-                Instruction::Return { value, .. } => {
-                    emitter.emit_return(value.as_ref(), function.return_type, &mut body)?;
-                    terminated = true;
-                }
-                Instruction::If {
-                    condition,
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    terminated = emitter.emit_if(
-                        condition,
-                        then_block,
-                        else_block.as_ref(),
-                        function.return_type,
-                        &mut body,
-                    )?;
-                }
-                Instruction::While {
-                    condition,
-                    body: loop_body,
-                    ..
-                } => {
-                    emitter.emit_while(condition, loop_body, function.return_type, &mut body)?;
-                }
-            }
-        }
-
-        if !terminated
-            && !body
-                .lines()
-                .any(|line| line.trim_start().starts_with("ret "))
-        {
-            let ty = llvm_type(function.return_type)?;
-            body.push_str(&format!(
-                "  ret {ty} {}\n",
-                default_value(function.return_type)?
-            ));
-        }
-
-        // Build and validate the compiler-owned CFG alongside the legacy structured emitter.
-        // The next migration step will make these blocks the source of LLVM control flow.
         for block in &cfg.blocks {
             for successor in cfg.successors(block.id) {
                 if cfg.block(successor).is_none() {
                     return Err(CodegenError::Unsupported("CFG successor references missing block"));
                 }
             }
+
+            if block.id != BlockId(0) {
+                body.push_str(&format!("\nbb{}:\n", block.id.0));
+            }
+            emitter.emit_cfg_instructions(&block.instructions, &mut body)?;
+            emitter.emit_cfg_terminator(&block.terminator, function.return_type, &mut body)?;
         }
 
         let return_type = if function.name == "main" {
@@ -205,6 +137,76 @@ impl<'a> FunctionEmitter<'a> {
     fn block_label(&mut self, prefix: &str) -> String {
         self.next_block += 1;
         format!("{prefix}.{}", self.next_block)
+    }
+
+    fn emit_cfg_instructions(
+        &mut self,
+        instructions: &[Instruction],
+        body: &mut String,
+    ) -> Result<(), CodegenError> {
+        for instruction in instructions {
+            match instruction {
+                Instruction::Bind { name, value, .. } => {
+                    let operand = self.emit_value(value, body)?;
+                    self.locals.insert(name.clone(), operand);
+                }
+                Instruction::BindMutable { name, value, .. } => {
+                    let operand = self.emit_value(value, body)?;
+                    let slot = format!("%{name}.addr");
+                    body.push_str(&format!("  {slot} = alloca i64\n"));
+                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                    self.mutable_locals.insert(name.clone(), slot);
+                }
+                Instruction::Assign { name, value, .. } => {
+                    let operand = self.emit_value(value, body)?;
+                    let slot = self
+                        .mutable_locals
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
+                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                }
+                Instruction::Evaluate { value, .. } => {
+                    let _ = self.emit_value(value, body)?;
+                }
+                Instruction::Return { .. } | Instruction::If { .. } | Instruction::While { .. } => {
+                    return Err(CodegenError::Unsupported(
+                        "structured control flow remained after CFG lowering",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_cfg_terminator(
+        &mut self,
+        terminator: &Terminator,
+        return_type: Type,
+        body: &mut String,
+    ) -> Result<(), CodegenError> {
+        match terminator {
+            Terminator::Return { value, .. } => self.emit_return(value.as_ref(), return_type, body),
+            Terminator::Jump { target, .. } => {
+                body.push_str(&format!("  br label %bb{}\n", target.0));
+                Ok(())
+            }
+            Terminator::Branch {
+                condition,
+                then_target,
+                else_target,
+                ..
+            } => {
+                let condition = self.emit_value(condition, body)?;
+                let condition_i1 = self.register();
+                body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
+                body.push_str(&format!(
+                    "  br i1 {condition_i1}, label %bb{}, label %bb{}\n",
+                    then_target.0, else_target.0
+                ));
+                Ok(())
+            }
+        }
     }
 
     fn emit_return(
