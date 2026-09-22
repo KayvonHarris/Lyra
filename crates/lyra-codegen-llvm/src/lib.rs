@@ -705,6 +705,65 @@ mod tests {
     }
 
     #[test]
+    fn loop_condition_reads_loop_carried_phi_value() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "count".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "counter".into(),
+                                    value: Value::Binary {
+                                        left: Box::new(Value::Local("counter".into(), span)),
+                                        operator: BinaryOperator::Add,
+                                        right: Box::new(Value::Integer(1, span)),
+                                        span,
+                                    },
+                                    span,
+                                }],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("counter".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("loop-carried SSA should lower");
+        let phi_line = llvm
+            .lines()
+            .find(|line| line.contains(" = phi i64 "))
+            .expect("loop header phi");
+        let phi_register = phi_line.trim().split(" =").next().expect("phi register");
+        assert!(
+            llvm.lines()
+                .any(|line| line.contains("icmp slt i64") && line.contains(phi_register)),
+            "loop condition should read the loop-carried phi value: {llvm}"
+        );
+    }
+
+    #[test]
     fn emits_mutable_local_storage_and_updates() {
         let span = Span { start: 0, end: 0 };
         let module = Module {
