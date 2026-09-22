@@ -457,7 +457,8 @@ impl CfgBuilder {
 
                 let mut outgoing = incoming;
                 for definition in &block.definitions {
-                    if let Some(instruction) = block.instructions.get(definition.instruction_index) {
+                    if let Some(instruction) = block.instructions.get(definition.instruction_index)
+                    {
                         if let Some(name) = defined_name(instruction) {
                             outgoing.insert(name.to_owned(), definition.id);
                         }
@@ -522,7 +523,9 @@ impl CfgBuilder {
 
                 let id = ValueId(self.next_value);
                 self.next_value += 1;
-                self.blocks[block_id.0].phi_nodes.push(PhiNode { id, name, incoming });
+                self.blocks[block_id.0]
+                    .phi_nodes
+                    .push(PhiNode { id, name, incoming });
             }
         }
     }
@@ -600,10 +603,7 @@ impl CfgBuilder {
                 self.collect_value_uses(left, uses);
                 self.collect_value_uses(right, uses);
             }
-            Value::Integer(..)
-            | Value::Float(..)
-            | Value::String(..)
-            | Value::Boolean(..) => {}
+            Value::Integer(..) | Value::Float(..) | Value::String(..) | Value::Boolean(..) => {}
         }
     }
 
@@ -1035,7 +1035,10 @@ mod tests {
 
         assert_eq!(phi.incoming.len(), 2);
         assert_ne!(phi.incoming[0].1, phi.incoming[1].1);
-        assert_eq!(cfg.definition_at_entry(loop_header.id, "counter"), Some(phi.id));
+        assert_eq!(
+            cfg.definition_at_entry(loop_header.id, "counter"),
+            Some(phi.id)
+        );
     }
 
     #[test]
@@ -1144,7 +1147,10 @@ mod tests {
         assert_eq!(second, ValueId(1));
         assert_eq!(values.len(), 2);
         assert_eq!(values.get(first).map(|value| value.ty), Some(Type::Integer));
-        assert_eq!(values.get(second).map(|value| value.ty), Some(Type::Boolean));
+        assert_eq!(
+            values.get(second).map(|value| value.ty),
+            Some(Type::Boolean)
+        );
         assert!(values.get(ValueId(99)).is_none());
     }
 
