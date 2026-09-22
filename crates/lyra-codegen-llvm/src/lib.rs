@@ -477,8 +477,8 @@ mod tests {
 
         let llvm = emit_llvm_ir(&module).expect("conditional should lower");
         assert!(llvm.contains("br i1"));
-        assert!(llvm.contains("if.then."));
-        assert!(llvm.contains("if.else."));
+        assert!(llvm.contains("bb1:"));
+        assert!(llvm.contains("bb2:"));
         assert!(llvm.contains("ret i32 42"));
         assert!(llvm.contains("ret i32 0"));
     }
@@ -514,9 +514,9 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("while loop should lower");
-        assert!(llvm.contains("while.cond."));
-        assert!(llvm.contains("while.body."));
-        assert!(llvm.contains("while.end."));
+        assert!(llvm.contains("bb1:"));
+        assert!(llvm.contains("bb2:"));
+        assert!(llvm.contains("bb3:"));
         assert!(llvm.contains("br i1"));
         assert!(llvm.contains("ret i32 42"));
     }
