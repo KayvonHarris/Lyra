@@ -54,6 +54,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             if block.id != BlockId(0) {
                 body.push_str(&format!("\nbb{}:\n", block.id.0));
             }
+            emitter.enter_cfg_block(&cfg, block);
             emitter.emit_phi_nodes(block, &mut body)?;
             emitter.emit_cfg_instructions(block, &mut body)?;
             emitter.emit_cfg_terminator(&block.terminator, function.return_type, &mut body)?;
@@ -121,6 +122,7 @@ struct FunctionEmitter<'a> {
     locals: HashMap<String, String>,
     mutable_locals: HashMap<String, String>,
     signatures: &'a HashMap<String, Type>,
+    ssa_locals: HashMap<String, String>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -130,12 +132,23 @@ impl<'a> FunctionEmitter<'a> {
             locals: HashMap::new(),
             mutable_locals: HashMap::new(),
             signatures,
+            ssa_locals: HashMap::new(),
         }
     }
 
     fn register(&mut self) -> String {
         self.next_register += 1;
         format!("%{}", self.next_register)
+    }
+
+    fn enter_cfg_block(&mut self, cfg: &lyra_ir::ControlFlowGraph, block: &BasicBlock) {
+        self.ssa_locals.clear();
+        if let Some(definitions) = cfg.entry_definitions.get(&block.id) {
+            for (name, id) in definitions {
+                self.ssa_locals
+                    .insert(name.clone(), Self::ssa_register(*id));
+            }
+        }
     }
 
     fn emit_phi_nodes(
@@ -190,6 +203,7 @@ impl<'a> FunctionEmitter<'a> {
                 Instruction::Bind { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
+                    self.ssa_locals.insert(name.clone(), operand.clone());
                     self.locals.insert(name.clone(), operand);
                 }
                 Instruction::BindMutable { name, value, .. } => {
@@ -198,6 +212,7 @@ impl<'a> FunctionEmitter<'a> {
                     let slot = format!("%{name}.addr");
                     body.push_str(&format!("  {slot} = alloca i64\n"));
                     body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                    self.ssa_locals.insert(name.clone(), operand);
                     self.mutable_locals.insert(name.clone(), slot);
                 }
                 Instruction::Assign { name, value, .. } => {
@@ -209,6 +224,7 @@ impl<'a> FunctionEmitter<'a> {
                         .cloned()
                         .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
                     body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
+                    self.ssa_locals.insert(name.clone(), operand);
                 }
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
@@ -288,7 +304,9 @@ impl<'a> FunctionEmitter<'a> {
             Value::Integer(value, _) => Ok(value.to_string()),
             Value::Boolean(value, _) => Ok(i64::from(*value).to_string()),
             Value::Local(name, _) => {
-                if let Some(slot) = self.mutable_locals.get(name).cloned() {
+                if let Some(value) = self.ssa_locals.get(name).cloned() {
+                    Ok(value)
+                } else if let Some(slot) = self.mutable_locals.get(name).cloned() {
                     let register = self.register();
                     body.push_str(&format!("  {register} = load i64, ptr {slot}\n"));
                     Ok(register)
@@ -632,6 +650,36 @@ mod tests {
         assert!(llvm.contains(" = phi i64 "));
         assert!(llvm.contains("[ %ssa1"));
         assert!(llvm.contains("[ %ssa2"));
+    }
+
+    #[test]
+    fn merged_local_reads_use_phi_value() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "choose".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable { name: "value".into(), value: Value::Integer(0, span), span },
+                        Instruction::If {
+                            condition: Value::Boolean(true, span),
+                            then_block: Block { instructions: vec![Instruction::Assign { name: "value".into(), value: Value::Integer(20, span), span }] },
+                            else_block: Some(Block { instructions: vec![Instruction::Assign { name: "value".into(), value: Value::Integer(22, span), span }] }),
+                            span,
+                        },
+                        Instruction::Return { value: Some(Value::Local("value".into(), span)), span },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("merged local should use phi value");
+        let phi_line = llvm.lines().find(|line| line.contains(" = phi i64 ")).expect("phi");
+        let phi_register = phi_line.trim().split(" =").next().expect("phi register");
+        assert!(llvm.contains(&format!("ret i64 {phi_register}")));
     }
 
     #[test]
