@@ -4,6 +4,8 @@
 //! LLVM IR. It preserves Lyra semantics without coupling the language to a
 //! particular code-generation framework.
 
+use std::collections::HashMap;
+
 use lyra_span::Span;
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -106,6 +108,7 @@ pub struct Block {
 pub struct ValueDefinition {
     pub id: ValueId,
     pub instruction_index: usize,
+    pub uses: Vec<ValueId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -352,6 +355,8 @@ pub fn build_cfg(block: &Block) -> ControlFlowGraph {
 struct CfgBuilder {
     blocks: Vec<BasicBlock>,
     terminated: Vec<bool>,
+    next_value: usize,
+    locals: HashMap<String, ValueId>,
 }
 
 impl CfgBuilder {
@@ -377,6 +382,46 @@ impl CfgBuilder {
 
     fn is_terminated(&self, id: BlockId) -> bool {
         self.terminated[id.0]
+    }
+
+    fn instruction_uses(&self, instruction: &Instruction) -> Vec<ValueId> {
+        let value = match instruction {
+            Instruction::Bind { value, .. }
+            | Instruction::BindMutable { value, .. }
+            | Instruction::Assign { value, .. }
+            | Instruction::Evaluate { value, .. } => value,
+            Instruction::Return { .. } | Instruction::If { .. } | Instruction::While { .. } => {
+                return Vec::new();
+            }
+        };
+
+        let mut uses = Vec::new();
+        self.collect_value_uses(value, &mut uses);
+        uses
+    }
+
+    fn collect_value_uses(&self, value: &Value, uses: &mut Vec<ValueId>) {
+        match value {
+            Value::Local(name, _) => {
+                if let Some(id) = self.locals.get(name) {
+                    uses.push(*id);
+                }
+            }
+            Value::Call { arguments, .. } => {
+                for argument in arguments {
+                    self.collect_value_uses(argument, uses);
+                }
+            }
+            Value::Unary { operand, .. } => self.collect_value_uses(operand, uses),
+            Value::Binary { left, right, .. } => {
+                self.collect_value_uses(left, uses);
+                self.collect_value_uses(right, uses);
+            }
+            Value::Integer(..)
+            | Value::Float(..)
+            | Value::String(..)
+            | Value::Boolean(..) => {}
+        }
     }
 
     fn lower_block(&mut self, block: &Block, mut current: BlockId) -> BlockId {
@@ -478,10 +523,37 @@ impl CfgBuilder {
                     );
                     return current;
                 }
-                other => self.blocks[current.0].instructions.push(other.clone()),
+                other => {
+                    let instruction_index = self.blocks[current.0].instructions.len();
+                    let uses = self.instruction_uses(other);
+                    self.blocks[current.0].instructions.push(other.clone());
+
+                    if let Some(name) = defined_name(other) {
+                        let id = ValueId(self.next_value);
+                        self.next_value += 1;
+                        self.locals.insert(name.to_owned(), id);
+                        self.blocks[current.0].definitions.push(ValueDefinition {
+                            id,
+                            instruction_index,
+                            uses,
+                        });
+                    }
+                }
             }
         }
         current
+    }
+}
+
+fn defined_name(instruction: &Instruction) -> Option<&str> {
+    match instruction {
+        Instruction::Bind { name, .. }
+        | Instruction::BindMutable { name, .. }
+        | Instruction::Assign { name, .. } => Some(name),
+        Instruction::Evaluate { .. }
+        | Instruction::Return { .. }
+        | Instruction::If { .. }
+        | Instruction::While { .. } => None,
     }
 }
 
@@ -743,10 +815,41 @@ mod tests {
         let definition = ValueDefinition {
             id: ValueId(3),
             instruction_index: 1,
+            uses: vec![ValueId(1), ValueId(2)],
         };
 
         assert_eq!(definition.id, ValueId(3));
         assert_eq!(definition.instruction_index, 1);
+        assert_eq!(definition.uses, vec![ValueId(1), ValueId(2)]);
+    }
+
+    #[test]
+    fn cfg_assigns_value_ids_and_tracks_uses() {
+        let module = lower_source(
+            "fn main() -> Int { let first = 20; let second = first + 22; return second; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let entry = cfg.block(BlockId(0)).expect("entry block");
+
+        assert_eq!(entry.definitions.len(), 2);
+        assert_eq!(entry.definitions[0].id, ValueId(0));
+        assert!(entry.definitions[0].uses.is_empty());
+        assert_eq!(entry.definitions[1].id, ValueId(1));
+        assert_eq!(entry.definitions[1].uses, vec![ValueId(0)]);
+    }
+
+    #[test]
+    fn cfg_assignment_creates_a_new_value_version() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; counter = counter + 1; return counter; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let entry = cfg.block(BlockId(0)).expect("entry block");
+
+        assert_eq!(entry.definitions.len(), 2);
+        assert_eq!(entry.definitions[0].id, ValueId(0));
+        assert_eq!(entry.definitions[1].id, ValueId(1));
+        assert_eq!(entry.definitions[1].uses, vec![ValueId(0)]);
     }
 
     #[test]
