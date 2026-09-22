@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use lyra_ir::{
-    BasicBlock, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value,
-    ValueId, build_cfg,
+    BasicBlock, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator,
+    Value, ValueId, build_cfg,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -662,14 +662,33 @@ mod tests {
                 return_type: Type::Integer,
                 body: Block {
                     instructions: vec![
-                        Instruction::BindMutable { name: "value".into(), value: Value::Integer(0, span), span },
-                        Instruction::If {
-                            condition: Value::Boolean(true, span),
-                            then_block: Block { instructions: vec![Instruction::Assign { name: "value".into(), value: Value::Integer(20, span), span }] },
-                            else_block: Some(Block { instructions: vec![Instruction::Assign { name: "value".into(), value: Value::Integer(22, span), span }] }),
+                        Instruction::BindMutable {
+                            name: "value".into(),
+                            value: Value::Integer(0, span),
                             span,
                         },
-                        Instruction::Return { value: Some(Value::Local("value".into(), span)), span },
+                        Instruction::If {
+                            condition: Value::Boolean(true, span),
+                            then_block: Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "value".into(),
+                                    value: Value::Integer(20, span),
+                                    span,
+                                }],
+                            },
+                            else_block: Some(Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "value".into(),
+                                    value: Value::Integer(22, span),
+                                    span,
+                                }],
+                            }),
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("value".into(), span)),
+                            span,
+                        },
                     ],
                 },
                 span,
@@ -677,7 +696,10 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("merged local should use phi value");
-        let phi_line = llvm.lines().find(|line| line.contains(" = phi i64 ")).expect("phi");
+        let phi_line = llvm
+            .lines()
+            .find(|line| line.contains(" = phi i64 "))
+            .expect("phi");
         let phi_register = phi_line.trim().split(" =").next().expect("phi register");
         assert!(llvm.contains(&format!("ret i64 {phi_register}")));
     }
