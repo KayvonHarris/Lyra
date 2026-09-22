@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use lyra_ir::{
-    BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value, build_cfg,
+    BasicBlock, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value,
+    ValueId, build_cfg,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +54,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             if block.id != BlockId(0) {
                 body.push_str(&format!("\nbb{}:\n", block.id.0));
             }
+            emitter.emit_phi_nodes(block, &mut body)?;
             emitter.emit_cfg_instructions(&block.instructions, &mut body)?;
             emitter.emit_cfg_terminator(&block.terminator, function.return_type, &mut body)?;
         }
@@ -134,6 +136,44 @@ impl<'a> FunctionEmitter<'a> {
     fn register(&mut self) -> String {
         self.next_register += 1;
         format!("%{}", self.next_register)
+    }
+
+    fn emit_phi_nodes(
+        &mut self,
+        block: &BasicBlock,
+        body: &mut String,
+    ) -> Result<(), CodegenError> {
+        for phi in &block.phi_nodes {
+            let incoming = phi
+                .incoming
+                .iter()
+                .map(|(predecessor, value)| {
+                    format!(
+                        "[ {}, %{} ]",
+                        Self::ssa_register(*value),
+                        Self::block_label(*predecessor)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            body.push_str(&format!(
+                "  {} = phi i64 {incoming}\n",
+                Self::ssa_register(phi.id)
+            ));
+        }
+        Ok(())
+    }
+
+    fn ssa_register(id: ValueId) -> String {
+        format!("%ssa{}", id.0)
+    }
+
+    fn block_label(id: BlockId) -> String {
+        if id == BlockId(0) {
+            "entry".to_owned()
+        } else {
+            format!("bb{}", id.0)
+        }
     }
 
     fn emit_cfg_instructions(
@@ -519,6 +559,54 @@ mod tests {
         assert!(llvm.contains("bb3:"));
         assert!(llvm.contains("br i1"));
         assert!(llvm.contains("ret i32 42"));
+    }
+
+    #[test]
+    fn emits_cfg_phi_nodes() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "value".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::If {
+                            condition: Value::Boolean(true, span),
+                            then_block: Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "value".into(),
+                                    value: Value::Integer(20, span),
+                                    span,
+                                }],
+                            },
+                            else_block: Some(Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "value".into(),
+                                    value: Value::Integer(22, span),
+                                    span,
+                                }],
+                            }),
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("value".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("phi nodes should lower");
+        assert!(llvm.contains(" = phi i64 "));
+        assert!(llvm.contains("[ %ssa"));
     }
 
     #[test]
