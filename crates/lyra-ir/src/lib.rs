@@ -127,10 +127,10 @@ pub struct BasicBlock {
     pub phi_nodes: Vec<PhiNode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
 pub type DefinitionMap = HashMap<String, ValueId>;
 pub type BlockDefinitionMap = HashMap<BlockId, DefinitionMap>;
 
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ControlFlowGraph {
     pub blocks: Vec<BasicBlock>,
     pub entry_definitions: BlockDefinitionMap,
