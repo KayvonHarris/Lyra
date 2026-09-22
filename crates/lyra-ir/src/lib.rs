@@ -103,10 +103,17 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ValueDefinition {
+    pub id: ValueId,
+    pub instruction_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct BasicBlock {
     pub id: BlockId,
     pub instructions: Vec<Instruction>,
     pub terminator: Terminator,
+    pub definitions: Vec<ValueDefinition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -357,6 +364,7 @@ impl CfgBuilder {
                 value: None,
                 span: Span::default(),
             },
+            definitions: Vec::new(),
         });
         self.terminated.push(false);
         id
@@ -701,6 +709,7 @@ mod tests {
                         else_target: BlockId(2),
                         span,
                     },
+                    definitions: vec![],
                 },
                 BasicBlock {
                     id: BlockId(1),
@@ -709,6 +718,7 @@ mod tests {
                         target: BlockId(2),
                         span,
                     },
+                    definitions: vec![],
                 },
                 BasicBlock {
                     id: BlockId(2),
@@ -717,6 +727,7 @@ mod tests {
                         value: Some(Value::Integer(42, span)),
                         span,
                     },
+                    definitions: vec![],
                 },
             ],
         };
@@ -725,6 +736,17 @@ mod tests {
         assert_eq!(cfg.successors(BlockId(1)), vec![BlockId(2)]);
         assert!(cfg.successors(BlockId(2)).is_empty());
         assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn basic_blocks_can_record_ssa_definitions() {
+        let definition = ValueDefinition {
+            id: ValueId(3),
+            instruction_index: 1,
+        };
+
+        assert_eq!(definition.id, ValueId(3));
+        assert_eq!(definition.instruction_index, 1);
     }
 
     #[test]
