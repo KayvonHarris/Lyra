@@ -116,7 +116,6 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 
 struct FunctionEmitter<'a> {
     next_register: usize,
-    next_block: usize,
     locals: HashMap<String, String>,
     mutable_locals: HashMap<String, String>,
     signatures: &'a HashMap<String, Type>,
@@ -126,7 +125,6 @@ impl<'a> FunctionEmitter<'a> {
     fn new(signatures: &'a HashMap<String, Type>) -> Self {
         Self {
             next_register: 0,
-            next_block: 0,
             locals: HashMap::new(),
             mutable_locals: HashMap::new(),
             signatures,
@@ -136,11 +134,6 @@ impl<'a> FunctionEmitter<'a> {
     fn register(&mut self) -> String {
         self.next_register += 1;
         format!("%{}", self.next_register)
-    }
-
-    fn block_label(&mut self, prefix: &str) -> String {
-        self.next_block += 1;
-        format!("{prefix}.{}", self.next_block)
     }
 
     fn emit_cfg_instructions(
@@ -226,141 +219,6 @@ impl<'a> FunctionEmitter<'a> {
         } else {
             body.push_str(&format!("  ret {ty} {}\n", default_value(return_type)?));
         }
-        Ok(())
-    }
-
-    fn emit_block(
-        &mut self,
-        block: &lyra_ir::Block,
-        return_type: Type,
-        body: &mut String,
-    ) -> Result<bool, CodegenError> {
-        for instruction in &block.instructions {
-            match instruction {
-                Instruction::Bind { name, value, .. } => {
-                    let operand = self.emit_value(value, body)?;
-                    self.locals.insert(name.clone(), operand);
-                }
-                Instruction::BindMutable { name, value, .. } => {
-                    let operand = self.emit_value(value, body)?;
-                    let slot = format!("%{name}.addr");
-                    body.push_str(&format!("  {slot} = alloca i64\n"));
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                    self.mutable_locals.insert(name.clone(), slot);
-                }
-                Instruction::Assign { name, value, .. } => {
-                    let operand = self.emit_value(value, body)?;
-                    let slot = self
-                        .mutable_locals
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                }
-                Instruction::Evaluate { value, .. } => {
-                    let _ = self.emit_value(value, body)?;
-                }
-                Instruction::Return { value, .. } => {
-                    self.emit_return(value.as_ref(), return_type, body)?;
-                    return Ok(true);
-                }
-                Instruction::If {
-                    condition,
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    if self.emit_if(
-                        condition,
-                        then_block,
-                        else_block.as_ref(),
-                        return_type,
-                        body,
-                    )? {
-                        return Ok(true);
-                    }
-                }
-                Instruction::While {
-                    condition,
-                    body: loop_body,
-                    ..
-                } => {
-                    self.emit_while(condition, loop_body, return_type, body)?;
-                }
-            }
-        }
-        Ok(false)
-    }
-
-    fn emit_if(
-        &mut self,
-        condition: &Value,
-        then_block: &lyra_ir::Block,
-        else_block: Option<&lyra_ir::Block>,
-        return_type: Type,
-        body: &mut String,
-    ) -> Result<bool, CodegenError> {
-        let condition = self.emit_value(condition, body)?;
-        let condition_i1 = self.register();
-        body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
-
-        let then_label = self.block_label("if.then");
-        let else_label = self.block_label("if.else");
-        let merge_label = self.block_label("if.end");
-        body.push_str(&format!(
-            "  br i1 {condition_i1}, label %{then_label}, label %{else_label}\n\n{then_label}:\n"
-        ));
-
-        let then_terminated = self.emit_block(then_block, return_type, body)?;
-        if !then_terminated {
-            body.push_str(&format!("  br label %{merge_label}\n"));
-        }
-
-        body.push_str(&format!("\n{else_label}:\n"));
-        let else_terminated = if let Some(else_block) = else_block {
-            self.emit_block(else_block, return_type, body)?
-        } else {
-            false
-        };
-        if !else_terminated {
-            body.push_str(&format!("  br label %{merge_label}\n"));
-        }
-
-        if then_terminated && else_terminated {
-            Ok(true)
-        } else {
-            body.push_str(&format!("\n{merge_label}:\n"));
-            Ok(false)
-        }
-    }
-
-    fn emit_while(
-        &mut self,
-        condition: &Value,
-        loop_body: &lyra_ir::Block,
-        return_type: Type,
-        body: &mut String,
-    ) -> Result<(), CodegenError> {
-        let condition_label = self.block_label("while.cond");
-        let body_label = self.block_label("while.body");
-        let exit_label = self.block_label("while.end");
-
-        body.push_str(&format!(
-            "  br label %{condition_label}\n\n{condition_label}:\n"
-        ));
-        let condition = self.emit_value(condition, body)?;
-        let condition_i1 = self.register();
-        body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
-        body.push_str(&format!(
-            "  br i1 {condition_i1}, label %{body_label}, label %{exit_label}\n\n{body_label}:\n"
-        ));
-
-        let body_terminated = self.emit_block(loop_body, return_type, body)?;
-        if !body_terminated {
-            body.push_str(&format!("  br label %{condition_label}\n"));
-        }
-
-        body.push_str(&format!("\n{exit_label}:\n"));
         Ok(())
     }
 
