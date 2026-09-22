@@ -130,6 +130,8 @@ pub struct BasicBlock {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ControlFlowGraph {
     pub blocks: Vec<BasicBlock>,
+    pub entry_definitions: HashMap<BlockId, HashMap<String, ValueId>>,
+    pub exit_definitions: HashMap<BlockId, HashMap<String, ValueId>>,
 }
 
 impl ControlFlowGraph {
@@ -145,6 +147,22 @@ impl ControlFlowGraph {
             .filter(|block| self.successors(block.id).contains(&id))
             .map(|block| block.id)
             .collect()
+    }
+
+    #[must_use]
+    pub fn definition_at_entry(&self, block: BlockId, name: &str) -> Option<ValueId> {
+        self.entry_definitions
+            .get(&block)
+            .and_then(|definitions| definitions.get(name))
+            .copied()
+    }
+
+    #[must_use]
+    pub fn definition_at_exit(&self, block: BlockId, name: &str) -> Option<ValueId> {
+        self.exit_definitions
+            .get(&block)
+            .and_then(|definitions| definitions.get(name))
+            .copied()
     }
 
     #[must_use]
@@ -364,8 +382,11 @@ pub fn build_cfg(block: &Block) -> ControlFlowGraph {
     let entry = builder.new_block();
     builder.lower_block(block, entry);
     builder.insert_phi_nodes();
+    let (entry_definitions, exit_definitions) = builder.compute_reaching_definitions();
     ControlFlowGraph {
         blocks: builder.blocks,
+        entry_definitions,
+        exit_definitions,
     }
 }
 
@@ -401,6 +422,58 @@ impl CfgBuilder {
 
     fn is_terminated(&self, id: BlockId) -> bool {
         self.terminated[id.0]
+    }
+
+    fn compute_reaching_definitions(
+        &self,
+    ) -> (
+        HashMap<BlockId, HashMap<String, ValueId>>,
+        HashMap<BlockId, HashMap<String, ValueId>>,
+    ) {
+        let mut entry: HashMap<BlockId, HashMap<String, ValueId>> = HashMap::new();
+        let mut exit: HashMap<BlockId, HashMap<String, ValueId>> = HashMap::new();
+        let max_iterations = self.blocks.len().saturating_mul(4).max(1);
+
+        for _ in 0..max_iterations {
+            let mut changed = false;
+            for block in &self.blocks {
+                let mut incoming = HashMap::new();
+                let predecessors = self.predecessors_of(block.id);
+                for predecessor in predecessors {
+                    if let Some(definitions) = exit.get(&predecessor) {
+                        for (name, id) in definitions {
+                            incoming.entry(name.clone()).or_insert(*id);
+                        }
+                    }
+                }
+                for phi in &block.phi_nodes {
+                    incoming.insert(phi.name.clone(), phi.id);
+                }
+
+                if entry.get(&block.id) != Some(&incoming) {
+                    entry.insert(block.id, incoming.clone());
+                    changed = true;
+                }
+
+                let mut outgoing = incoming;
+                for definition in &block.definitions {
+                    if let Some(instruction) = block.instructions.get(definition.instruction_index) {
+                        if let Some(name) = defined_name(instruction) {
+                            outgoing.insert(name.to_owned(), definition.id);
+                        }
+                    }
+                }
+                if exit.get(&block.id) != Some(&outgoing) {
+                    exit.insert(block.id, outgoing);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        (entry, exit)
     }
 
     fn insert_phi_nodes(&mut self) {
@@ -897,6 +970,8 @@ mod tests {
                     phi_nodes: vec![],
                 },
             ],
+            entry_definitions: HashMap::new(),
+            exit_definitions: HashMap::new(),
         };
 
         assert_eq!(cfg.successors(BlockId(0)), vec![BlockId(1), BlockId(2)]);
@@ -906,6 +981,22 @@ mod tests {
         assert_eq!(cfg.predecessors(BlockId(1)), vec![BlockId(0)]);
         assert_eq!(cfg.predecessors(BlockId(2)), vec![BlockId(0), BlockId(1)]);
         assert!(cfg.block(BlockId(99)).is_none());
+    }
+
+    #[test]
+    fn propagates_reaching_definitions_through_intermediate_blocks() {
+        let module = lower_source(
+            "fn main() -> Int { var value = 1; if true { let other = value + 1; } return value; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let merge = cfg
+            .blocks
+            .iter()
+            .find(|block| cfg.predecessors(block.id).len() == 2)
+            .expect("merge block");
+
+        assert_eq!(cfg.definition_at_entry(merge.id, "value"), Some(ValueId(0)));
+        assert_eq!(cfg.definition_at_exit(merge.id, "value"), Some(ValueId(0)));
     }
 
     #[test]
