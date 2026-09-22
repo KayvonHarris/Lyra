@@ -305,6 +305,7 @@ pub fn build_cfg(block: &Block) -> ControlFlowGraph {
 #[derive(Default)]
 struct CfgBuilder {
     blocks: Vec<BasicBlock>,
+    terminated: Vec<bool>,
 }
 
 impl CfgBuilder {
@@ -318,11 +319,17 @@ impl CfgBuilder {
                 span: Span::default(),
             },
         });
+        self.terminated.push(false);
         id
     }
 
     fn set_terminator(&mut self, id: BlockId, terminator: Terminator) {
         self.blocks[id.0].terminator = terminator;
+        self.terminated[id.0] = true;
+    }
+
+    fn is_terminated(&self, id: BlockId) -> bool {
+        self.terminated[id.0]
     }
 
     fn lower_block(&mut self, block: &Block, mut current: BlockId) -> BlockId {
@@ -347,10 +354,7 @@ impl CfgBuilder {
                         },
                     );
                     let then_end = self.lower_block(then_block, then_id);
-                    if matches!(
-                        self.blocks[then_end.0].terminator,
-                        Terminator::Return { value: None, .. }
-                    ) {
+                    if !self.is_terminated(then_end) {
                         self.set_terminator(
                             then_end,
                             Terminator::Jump {
@@ -361,10 +365,7 @@ impl CfgBuilder {
                     }
                     if let Some(else_block) = else_block {
                         let else_end = self.lower_block(else_block, else_id);
-                        if matches!(
-                            self.blocks[else_end.0].terminator,
-                            Terminator::Return { value: None, .. }
-                        ) {
+                        if !self.is_terminated(else_end) {
                             self.set_terminator(
                                 else_end,
                                 Terminator::Jump {
@@ -409,10 +410,7 @@ impl CfgBuilder {
                         },
                     );
                     let body_end = self.lower_block(body, body_id);
-                    if matches!(
-                        self.blocks[body_end.0].terminator,
-                        Terminator::Return { value: None, .. }
-                    ) {
+                    if !self.is_terminated(body_end) {
                         self.set_terminator(
                             body_end,
                             Terminator::Jump {

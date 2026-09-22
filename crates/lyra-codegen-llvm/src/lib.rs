@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use lyra_ir::{BinaryOperator, Instruction, Module, Type, UnaryOperator, Value};
+use lyra_ir::{
+    BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value, build_cfg,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodegenError {
@@ -31,8 +33,6 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             .iter()
             .map(|parameter| Ok(format!("{} %{}", llvm_type(parameter.ty)?, parameter.name)))
             .collect::<Result<Vec<_>, CodegenError>>()?
-            .into_iter()
-            .collect::<Vec<_>>()
             .join(", ");
         for parameter in &function.parameters {
             emitter
@@ -40,74 +40,21 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 .insert(parameter.name.clone(), format!("%{}", parameter.name));
         }
 
-        let mut terminated = false;
-        for instruction in &function.body.instructions {
-            if terminated {
-                break;
-            }
-
-            match instruction {
-                Instruction::Bind { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    emitter.locals.insert(name.clone(), operand);
-                }
-                Instruction::BindMutable { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    let slot = format!("%{name}.addr");
-                    body.push_str(&format!("  {slot} = alloca i64\n"));
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                    emitter.mutable_locals.insert(name.clone(), slot);
-                }
-                Instruction::Assign { name, value, .. } => {
-                    let operand = emitter.emit_value(value, &mut body)?;
-                    let slot = emitter
-                        .mutable_locals
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                }
-                Instruction::Evaluate { value, .. } => {
-                    let _ = emitter.emit_value(value, &mut body)?;
-                }
-                Instruction::Return { value, .. } => {
-                    emitter.emit_return(value.as_ref(), function.return_type, &mut body)?;
-                    terminated = true;
-                }
-                Instruction::If {
-                    condition,
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    terminated = emitter.emit_if(
-                        condition,
-                        then_block,
-                        else_block.as_ref(),
-                        function.return_type,
-                        &mut body,
-                    )?;
-                }
-                Instruction::While {
-                    condition,
-                    body: loop_body,
-                    ..
-                } => {
-                    emitter.emit_while(condition, loop_body, function.return_type, &mut body)?;
+        let cfg = build_cfg(&function.body);
+        for block in &cfg.blocks {
+            for successor in cfg.successors(block.id) {
+                if cfg.block(successor).is_none() {
+                    return Err(CodegenError::Unsupported(
+                        "CFG successor references missing block",
+                    ));
                 }
             }
-        }
 
-        if !terminated
-            && !body
-                .lines()
-                .any(|line| line.trim_start().starts_with("ret "))
-        {
-            let ty = llvm_type(function.return_type)?;
-            body.push_str(&format!(
-                "  ret {ty} {}\n",
-                default_value(function.return_type)?
-            ));
+            if block.id != BlockId(0) {
+                body.push_str(&format!("\nbb{}:\n", block.id.0));
+            }
+            emitter.emit_cfg_instructions(&block.instructions, &mut body)?;
+            emitter.emit_cfg_terminator(&block.terminator, function.return_type, &mut body)?;
         }
 
         let return_type = if function.name == "main" {
@@ -169,7 +116,6 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 
 struct FunctionEmitter<'a> {
     next_register: usize,
-    next_block: usize,
     locals: HashMap<String, String>,
     mutable_locals: HashMap<String, String>,
     signatures: &'a HashMap<String, Type>,
@@ -179,7 +125,6 @@ impl<'a> FunctionEmitter<'a> {
     fn new(signatures: &'a HashMap<String, Type>) -> Self {
         Self {
             next_register: 0,
-            next_block: 0,
             locals: HashMap::new(),
             mutable_locals: HashMap::new(),
             signatures,
@@ -191,34 +136,12 @@ impl<'a> FunctionEmitter<'a> {
         format!("%{}", self.next_register)
     }
 
-    fn block_label(&mut self, prefix: &str) -> String {
-        self.next_block += 1;
-        format!("{prefix}.{}", self.next_block)
-    }
-
-    fn emit_return(
+    fn emit_cfg_instructions(
         &mut self,
-        value: Option<&Value>,
-        return_type: Type,
+        instructions: &[Instruction],
         body: &mut String,
     ) -> Result<(), CodegenError> {
-        let ty = llvm_type(return_type)?;
-        if let Some(value) = value {
-            let operand = self.emit_value(value, body)?;
-            body.push_str(&format!("  ret {ty} {operand}\n"));
-        } else {
-            body.push_str(&format!("  ret {ty} {}\n", default_value(return_type)?));
-        }
-        Ok(())
-    }
-
-    fn emit_block(
-        &mut self,
-        block: &lyra_ir::Block,
-        return_type: Type,
-        body: &mut String,
-    ) -> Result<bool, CodegenError> {
-        for instruction in &block.instructions {
+        for instruction in instructions {
             match instruction {
                 Instruction::Bind { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
@@ -243,107 +166,59 @@ impl<'a> FunctionEmitter<'a> {
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
                 }
-                Instruction::Return { value, .. } => {
-                    self.emit_return(value.as_ref(), return_type, body)?;
-                    return Ok(true);
-                }
-                Instruction::If {
-                    condition,
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    if self.emit_if(
-                        condition,
-                        then_block,
-                        else_block.as_ref(),
-                        return_type,
-                        body,
-                    )? {
-                        return Ok(true);
-                    }
-                }
-                Instruction::While {
-                    condition,
-                    body: loop_body,
-                    ..
-                } => {
-                    self.emit_while(condition, loop_body, return_type, body)?;
+                Instruction::Return { .. } | Instruction::If { .. } | Instruction::While { .. } => {
+                    return Err(CodegenError::Unsupported(
+                        "structured control flow remained after CFG lowering",
+                    ));
                 }
             }
         }
-        Ok(false)
+        Ok(())
     }
 
-    fn emit_if(
+    fn emit_cfg_terminator(
         &mut self,
-        condition: &Value,
-        then_block: &lyra_ir::Block,
-        else_block: Option<&lyra_ir::Block>,
-        return_type: Type,
-        body: &mut String,
-    ) -> Result<bool, CodegenError> {
-        let condition = self.emit_value(condition, body)?;
-        let condition_i1 = self.register();
-        body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
-
-        let then_label = self.block_label("if.then");
-        let else_label = self.block_label("if.else");
-        let merge_label = self.block_label("if.end");
-        body.push_str(&format!(
-            "  br i1 {condition_i1}, label %{then_label}, label %{else_label}\n\n{then_label}:\n"
-        ));
-
-        let then_terminated = self.emit_block(then_block, return_type, body)?;
-        if !then_terminated {
-            body.push_str(&format!("  br label %{merge_label}\n"));
-        }
-
-        body.push_str(&format!("\n{else_label}:\n"));
-        let else_terminated = if let Some(else_block) = else_block {
-            self.emit_block(else_block, return_type, body)?
-        } else {
-            false
-        };
-        if !else_terminated {
-            body.push_str(&format!("  br label %{merge_label}\n"));
-        }
-
-        if then_terminated && else_terminated {
-            Ok(true)
-        } else {
-            body.push_str(&format!("\n{merge_label}:\n"));
-            Ok(false)
-        }
-    }
-
-    fn emit_while(
-        &mut self,
-        condition: &Value,
-        loop_body: &lyra_ir::Block,
+        terminator: &Terminator,
         return_type: Type,
         body: &mut String,
     ) -> Result<(), CodegenError> {
-        let condition_label = self.block_label("while.cond");
-        let body_label = self.block_label("while.body");
-        let exit_label = self.block_label("while.end");
-
-        body.push_str(&format!(
-            "  br label %{condition_label}\n\n{condition_label}:\n"
-        ));
-        let condition = self.emit_value(condition, body)?;
-        let condition_i1 = self.register();
-        body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
-        body.push_str(&format!(
-            "  br i1 {condition_i1}, label %{body_label}, label %{exit_label}\n\n{body_label}:\n"
-        ));
-
-        let body_terminated = self.emit_block(loop_body, return_type, body)?;
-        if !body_terminated {
-            body.push_str(&format!("  br label %{condition_label}\n"));
+        match terminator {
+            Terminator::Return { value, .. } => self.emit_return(value.as_ref(), return_type, body),
+            Terminator::Jump { target, .. } => {
+                body.push_str(&format!("  br label %bb{}\n", target.0));
+                Ok(())
+            }
+            Terminator::Branch {
+                condition,
+                then_target,
+                else_target,
+                ..
+            } => {
+                let condition = self.emit_value(condition, body)?;
+                let condition_i1 = self.register();
+                body.push_str(&format!("  {condition_i1} = icmp ne i64 {condition}, 0\n"));
+                body.push_str(&format!(
+                    "  br i1 {condition_i1}, label %bb{}, label %bb{}\n",
+                    then_target.0, else_target.0
+                ));
+                Ok(())
+            }
         }
+    }
 
-        body.push_str(&format!("\n{exit_label}:\n"));
+    fn emit_return(
+        &mut self,
+        value: Option<&Value>,
+        return_type: Type,
+        body: &mut String,
+    ) -> Result<(), CodegenError> {
+        let ty = llvm_type(return_type)?;
+        if let Some(value) = value {
+            let operand = self.emit_value(value, body)?;
+            body.push_str(&format!("  ret {ty} {operand}\n"));
+        } else {
+            body.push_str(&format!("  ret {ty} {}\n", default_value(return_type)?));
+        }
         Ok(())
     }
 
@@ -602,8 +477,8 @@ mod tests {
 
         let llvm = emit_llvm_ir(&module).expect("conditional should lower");
         assert!(llvm.contains("br i1"));
-        assert!(llvm.contains("if.then."));
-        assert!(llvm.contains("if.else."));
+        assert!(llvm.contains("bb1:"));
+        assert!(llvm.contains("bb2:"));
         assert!(llvm.contains("ret i32 42"));
         assert!(llvm.contains("ret i32 0"));
     }
@@ -639,9 +514,9 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("while loop should lower");
-        assert!(llvm.contains("while.cond."));
-        assert!(llvm.contains("while.body."));
-        assert!(llvm.contains("while.end."));
+        assert!(llvm.contains("bb1:"));
+        assert!(llvm.contains("bb2:"));
+        assert!(llvm.contains("bb3:"));
         assert!(llvm.contains("br i1"));
         assert!(llvm.contains("ret i32 42"));
     }
@@ -686,6 +561,51 @@ mod tests {
         assert!(llvm.contains("store i64 0, ptr %counter.addr"));
         assert!(llvm.contains("load i64, ptr %counter.addr"));
         assert!(llvm.contains("store i64 %"));
+    }
+
+    #[test]
+    fn validates_cfg_before_llvm_emission() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::If {
+                            condition: Value::Boolean(true, span),
+                            then_block: Block {
+                                instructions: vec![Instruction::Return {
+                                    value: Some(Value::Integer(42, span)),
+                                    span,
+                                }],
+                            },
+                            else_block: None,
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Integer(0, span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let cfg = build_cfg(&module.functions[0].body);
+        assert!(cfg.blocks.iter().any(|block| matches!(
+            block.terminator,
+            Terminator::Branch {
+                then_target: BlockId(_),
+                else_target: BlockId(_),
+                ..
+            }
+        )));
+
+        let llvm = emit_llvm_ir(&module).expect("valid CFG should permit LLVM emission");
+        assert!(llvm.contains("define i32 @main()"));
     }
 
     #[test]
