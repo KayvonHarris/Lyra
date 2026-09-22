@@ -55,7 +55,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 body.push_str(&format!("\nbb{}:\n", block.id.0));
             }
             emitter.emit_phi_nodes(block, &mut body)?;
-            emitter.emit_cfg_instructions(&block.instructions, &mut body)?;
+            emitter.emit_cfg_instructions(block, &mut body)?;
             emitter.emit_cfg_terminator(&block.terminator, function.return_type, &mut body)?;
         }
 
@@ -178,17 +178,23 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_cfg_instructions(
         &mut self,
-        instructions: &[Instruction],
+        block: &BasicBlock,
         body: &mut String,
     ) -> Result<(), CodegenError> {
-        for instruction in instructions {
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+            let definition = block
+                .definitions
+                .iter()
+                .find(|definition| definition.instruction_index == instruction_index);
             match instruction {
                 Instruction::Bind { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
+                    let operand = self.materialize_ssa_definition(definition, &operand, body);
                     self.locals.insert(name.clone(), operand);
                 }
                 Instruction::BindMutable { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
+                    let operand = self.materialize_ssa_definition(definition, &operand, body);
                     let slot = format!("%{name}.addr");
                     body.push_str(&format!("  {slot} = alloca i64\n"));
                     body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
@@ -196,6 +202,7 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 Instruction::Assign { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
+                    let operand = self.materialize_ssa_definition(definition, &operand, body);
                     let slot = self
                         .mutable_locals
                         .get(name)
@@ -214,6 +221,20 @@ impl<'a> FunctionEmitter<'a> {
             }
         }
         Ok(())
+    }
+
+    fn materialize_ssa_definition(
+        &self,
+        definition: Option<&lyra_ir::ValueDefinition>,
+        operand: &str,
+        body: &mut String,
+    ) -> String {
+        let Some(definition) = definition else {
+            return operand.to_owned();
+        };
+        let register = Self::ssa_register(definition.id);
+        body.push_str(&format!("  {register} = add i64 {operand}, 0\n"));
+        register
     }
 
     fn emit_cfg_terminator(
@@ -605,8 +626,12 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("phi nodes should lower");
+        assert!(llvm.contains("%ssa0 = add i64 0, 0"));
+        assert!(llvm.contains("%ssa1 = add i64 20, 0"));
+        assert!(llvm.contains("%ssa2 = add i64 22, 0"));
         assert!(llvm.contains(" = phi i64 "));
-        assert!(llvm.contains("[ %ssa"));
+        assert!(llvm.contains("[ %ssa1"));
+        assert!(llvm.contains("[ %ssa2"));
     }
 
     #[test]
