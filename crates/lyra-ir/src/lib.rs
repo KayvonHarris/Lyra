@@ -128,10 +128,13 @@ pub struct BasicBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+pub type DefinitionMap = HashMap<String, ValueId>;
+pub type BlockDefinitionMap = HashMap<BlockId, DefinitionMap>;
+
 pub struct ControlFlowGraph {
     pub blocks: Vec<BasicBlock>,
-    pub entry_definitions: HashMap<BlockId, HashMap<String, ValueId>>,
-    pub exit_definitions: HashMap<BlockId, HashMap<String, ValueId>>,
+    pub entry_definitions: BlockDefinitionMap,
+    pub exit_definitions: BlockDefinitionMap,
 }
 
 impl ControlFlowGraph {
@@ -424,14 +427,9 @@ impl CfgBuilder {
         self.terminated[id.0]
     }
 
-    fn compute_reaching_definitions(
-        &self,
-    ) -> (
-        HashMap<BlockId, HashMap<String, ValueId>>,
-        HashMap<BlockId, HashMap<String, ValueId>>,
-    ) {
-        let mut entry: HashMap<BlockId, HashMap<String, ValueId>> = HashMap::new();
-        let mut exit: HashMap<BlockId, HashMap<String, ValueId>> = HashMap::new();
+    fn compute_reaching_definitions(&self) -> (BlockDefinitionMap, BlockDefinitionMap) {
+        let mut entry: BlockDefinitionMap = HashMap::new();
+        let mut exit: BlockDefinitionMap = HashMap::new();
         let max_iterations = self.blocks.len().saturating_mul(4).max(1);
 
         for _ in 0..max_iterations {
@@ -458,10 +456,9 @@ impl CfgBuilder {
                 let mut outgoing = incoming;
                 for definition in &block.definitions {
                     if let Some(instruction) = block.instructions.get(definition.instruction_index)
+                        && let Some(name) = defined_name(instruction)
                     {
-                        if let Some(name) = defined_name(instruction) {
-                            outgoing.insert(name.to_owned(), definition.id);
-                        }
+                        outgoing.insert(name.to_owned(), definition.id);
                     }
                 }
                 if exit.get(&block.id) != Some(&outgoing) {
@@ -561,10 +558,9 @@ impl CfgBuilder {
             if let Some(instruction) = self.blocks[id.0]
                 .instructions
                 .get(definition.instruction_index)
+                && let Some(name) = defined_name(instruction)
             {
-                if let Some(name) = defined_name(instruction) {
-                    definitions.insert(name.to_owned(), definition.id);
-                }
+                definitions.insert(name.to_owned(), definition.id);
             }
         }
         definitions
