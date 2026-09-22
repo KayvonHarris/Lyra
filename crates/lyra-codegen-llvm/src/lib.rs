@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use lyra_ir::{BinaryOperator, Instruction, Module, Type, UnaryOperator, Value};
+use lyra_ir::{build_cfg, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodegenError {
@@ -40,6 +40,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 .insert(parameter.name.clone(), format!("%{}", parameter.name));
         }
 
+        let cfg = build_cfg(&function.body);
         let mut terminated = false;
         for instruction in &function.body.instructions {
             if terminated {
@@ -108,6 +109,16 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 "  ret {ty} {}\n",
                 default_value(function.return_type)?
             ));
+        }
+
+        // Build and validate the compiler-owned CFG alongside the legacy structured emitter.
+        // The next migration step will make these blocks the source of LLVM control flow.
+        for block in &cfg.blocks {
+            for successor in cfg.successors(block.id) {
+                if cfg.block(successor).is_none() {
+                    return Err(CodegenError::Unsupported("CFG successor references missing block"));
+                }
+            }
         }
 
         let return_type = if function.name == "main" {
@@ -686,6 +697,51 @@ mod tests {
         assert!(llvm.contains("store i64 0, ptr %counter.addr"));
         assert!(llvm.contains("load i64, ptr %counter.addr"));
         assert!(llvm.contains("store i64 %"));
+    }
+
+    #[test]
+    fn validates_cfg_before_llvm_emission() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::If {
+                            condition: Value::Boolean(true, span),
+                            then_block: Block {
+                                instructions: vec![Instruction::Return {
+                                    value: Some(Value::Integer(42, span)),
+                                    span,
+                                }],
+                            },
+                            else_block: None,
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Integer(0, span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let cfg = build_cfg(&module.functions[0].body);
+        assert!(cfg.blocks.iter().any(|block| matches!(
+            block.terminator,
+            Terminator::Branch {
+                then_target: BlockId(_),
+                else_target: BlockId(_),
+                ..
+            }
+        )));
+
+        let llvm = emit_llvm_ir(&module).expect("valid CFG should permit LLVM emission");
+        assert!(llvm.contains("define i32 @main()"));
     }
 
     #[test]
