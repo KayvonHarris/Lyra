@@ -716,10 +716,13 @@ mod tests {
 
     #[test]
     fn accepts_non_unit_function_ending_in_while_true() {
-        let analysis = analyze_source(
-            "fn spin() -> Int { while true { } } fn main() -> Int { return 0; }",
+        let analysis =
+            analyze_source("fn spin() -> Int { while true { } } fn main() -> Int { return 0; }");
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
         );
-        assert!(analysis.diagnostics.is_empty(), "{:?}", analysis.diagnostics);
     }
 
     #[test]
