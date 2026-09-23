@@ -70,10 +70,7 @@ impl Analyzer {
                             .is_some_and(|type_name| Self::type_from_name(type_name) == Type::Unit)
                         {
                             self.error(
-                                format!(
-                                    "parameter `{}` cannot have type Unit",
-                                    parameter.name
-                                ),
+                                format!("parameter `{}` cannot have type Unit", parameter.name),
                                 parameter.span,
                             );
                         }
@@ -714,8 +711,9 @@ mod tests {
 
     #[test]
     fn rejects_unit_parameter_type() {
-        let analysis =
-            analyze_source("fn consume(value: Unit) -> Int { return 0; } fn main() -> Int { return 0; }");
+        let analysis = analyze_source(
+            "fn consume(value: Unit) -> Int { return 0; } fn main() -> Int { return 0; }",
+        );
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
