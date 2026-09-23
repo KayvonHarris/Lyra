@@ -759,20 +759,24 @@ mod tests {
         let analysis = analyze_source(
             "fn consume(value: Mystery) -> Int { return 0; } fn main() -> Int { return 0; }",
         );
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("unknown type `Mystery`")));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown type `Mystery`"))
+        );
     }
 
     #[test]
     fn rejects_unknown_return_type() {
         let analysis =
             analyze_source("fn mystery() -> Mystery { return 0; } fn main() -> Int { return 0; }");
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("unknown type `Mystery`")));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown type `Mystery`"))
+        );
     }
 
     #[test]
