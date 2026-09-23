@@ -535,7 +535,9 @@ mod tests {
             "fn choose(flag: Bool) -> Int { if flag { return 42; } } fn main() -> Int { return 0; }",
         );
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("may exit without returning Integer")
+            diagnostic
+                .message
+                .contains("may exit without returning Integer")
         }));
     }
 
