@@ -73,10 +73,7 @@ impl Analyzer {
                     if let Some(type_name) = &function.return_type
                         && Self::type_from_name(type_name) == Type::Unknown
                     {
-                        self.error(
-                            format!("unknown type `{}`", type_name.name),
-                            type_name.span,
-                        );
+                        self.error(format!("unknown type `{}`", type_name.name), type_name.span);
                     }
                     if function.name == "main" && !function.parameters.is_empty() {
                         self.error("`main` cannot declare parameters yet", function.span);
