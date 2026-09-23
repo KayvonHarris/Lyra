@@ -63,6 +63,21 @@ impl Analyzer {
                     if function.name == "main" && !function.parameters.is_empty() {
                         self.error("`main` cannot declare parameters yet", function.span);
                     }
+                    for parameter in &function.parameters {
+                        if parameter
+                            .type_name
+                            .as_ref()
+                            .is_some_and(|type_name| Self::type_from_name(type_name) == Type::Unit)
+                        {
+                            self.error(
+                                format!(
+                                    "parameter `{}` cannot have type Unit",
+                                    parameter.name
+                                ),
+                                parameter.span,
+                            );
+                        }
+                    }
                     if function.name == "main" {
                         let return_type = function
                             .return_type
@@ -694,6 +709,17 @@ mod tests {
         );
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains("argument 1") && diagnostic.message.contains("Integer")
+        }));
+    }
+
+    #[test]
+    fn rejects_unit_parameter_type() {
+        let analysis =
+            analyze_source("fn consume(value: Unit) -> Int { return 0; } fn main() -> Int { return 0; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("parameter `value` cannot have type Unit")
         }));
     }
 
