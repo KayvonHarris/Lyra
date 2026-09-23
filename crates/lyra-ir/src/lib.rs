@@ -397,7 +397,6 @@ struct CfgBuilder {
     blocks: Vec<BasicBlock>,
     terminated: Vec<bool>,
     next_value: usize,
-    locals: HashMap<String, ValueId>,
 }
 
 impl CfgBuilder {
@@ -550,7 +549,34 @@ impl CfgBuilder {
             }
         }
 
+        self.resolve_definition_uses(&entry);
+
         (entry, exit)
+    }
+
+    fn resolve_definition_uses(&mut self, entry: &BlockDefinitionMap) {
+        for block_index in 0..self.blocks.len() {
+            let block_id = BlockId(block_index);
+            let mut environment = entry.get(&block_id).cloned().unwrap_or_default();
+
+            for definition_index in 0..self.blocks[block_index].definitions.len() {
+                let instruction_index =
+                    self.blocks[block_index].definitions[definition_index].instruction_index;
+                let instruction = self.blocks[block_index].instructions[instruction_index].clone();
+                let mut uses = Vec::new();
+                collect_value_uses_from_environment(
+                    instruction_value(&instruction),
+                    &environment,
+                    &mut uses,
+                );
+                self.blocks[block_index].definitions[definition_index].uses = uses;
+
+                if let Some(name) = defined_name(&instruction) {
+                    let id = self.blocks[block_index].definitions[definition_index].id;
+                    environment.insert(name.to_owned(), id);
+                }
+            }
+        }
     }
 
     fn predecessors_of(&self, id: BlockId) -> Vec<BlockId> {
@@ -559,43 +585,6 @@ impl CfgBuilder {
             .filter(|block| terminator_targets(&block.terminator).contains(&id))
             .map(|block| block.id)
             .collect()
-    }
-
-    fn instruction_uses(&self, instruction: &Instruction) -> Vec<ValueId> {
-        let value = match instruction {
-            Instruction::Bind { value, .. }
-            | Instruction::BindMutable { value, .. }
-            | Instruction::Assign { value, .. }
-            | Instruction::Evaluate { value, .. } => value,
-            Instruction::Return { .. } | Instruction::If { .. } | Instruction::While { .. } => {
-                return Vec::new();
-            }
-        };
-
-        let mut uses = Vec::new();
-        self.collect_value_uses(value, &mut uses);
-        uses
-    }
-
-    fn collect_value_uses(&self, value: &Value, uses: &mut Vec<ValueId>) {
-        match value {
-            Value::Local(name, _) => {
-                if let Some(id) = self.locals.get(name) {
-                    uses.push(*id);
-                }
-            }
-            Value::Call { arguments, .. } => {
-                for argument in arguments {
-                    self.collect_value_uses(argument, uses);
-                }
-            }
-            Value::Unary { operand, .. } => self.collect_value_uses(operand, uses),
-            Value::Binary { left, right, .. } => {
-                self.collect_value_uses(left, uses);
-                self.collect_value_uses(right, uses);
-            }
-            Value::Integer(..) | Value::Float(..) | Value::String(..) | Value::Boolean(..) => {}
-        }
     }
 
     fn lower_block(&mut self, block: &Block, mut current: BlockId) -> BlockId {
@@ -699,23 +688,62 @@ impl CfgBuilder {
                 }
                 other => {
                     let instruction_index = self.blocks[current.0].instructions.len();
-                    let uses = self.instruction_uses(other);
                     self.blocks[current.0].instructions.push(other.clone());
 
                     if let Some(name) = defined_name(other) {
                         let id = ValueId(self.next_value);
                         self.next_value += 1;
-                        self.locals.insert(name.to_owned(), id);
                         self.blocks[current.0].definitions.push(ValueDefinition {
                             id,
                             instruction_index,
-                            uses,
+                            uses: Vec::new(),
                         });
                     }
                 }
             }
         }
         current
+    }
+}
+
+fn instruction_value(instruction: &Instruction) -> Option<&Value> {
+    match instruction {
+        Instruction::Bind { value, .. }
+        | Instruction::BindMutable { value, .. }
+        | Instruction::Assign { value, .. }
+        | Instruction::Evaluate { value, .. } => Some(value),
+        Instruction::Return { .. } | Instruction::If { .. } | Instruction::While { .. } => None,
+    }
+}
+
+fn collect_value_uses_from_environment(
+    value: Option<&Value>,
+    environment: &DefinitionMap,
+    uses: &mut Vec<ValueId>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+
+    match value {
+        Value::Local(name, _) => {
+            if let Some(id) = environment.get(name) {
+                uses.push(*id);
+            }
+        }
+        Value::Call { arguments, .. } => {
+            for argument in arguments {
+                collect_value_uses_from_environment(Some(argument), environment, uses);
+            }
+        }
+        Value::Unary { operand, .. } => {
+            collect_value_uses_from_environment(Some(operand), environment, uses);
+        }
+        Value::Binary { left, right, .. } => {
+            collect_value_uses_from_environment(Some(left), environment, uses);
+            collect_value_uses_from_environment(Some(right), environment, uses);
+        }
+        Value::Integer(..) | Value::Float(..) | Value::String(..) | Value::Boolean(..) => {}
     }
 }
 
@@ -1119,6 +1147,28 @@ mod tests {
         assert_eq!(definition.id, ValueId(3));
         assert_eq!(definition.instruction_index, 1);
         assert_eq!(definition.uses, vec![ValueId(1), ValueId(2)]);
+    }
+
+    #[test]
+    fn sibling_branch_uses_pre_branch_definition() {
+        let module = lower_source(
+            "fn main() -> Int { var x = 1; var y = 0; if true { x = 2; } else { y = x; } return y; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let else_definition = cfg
+            .blocks
+            .iter()
+            .flat_map(|block| block.definitions.iter().map(move |definition| (block, definition)))
+            .find(|(block, definition)| {
+                matches!(
+                    block.instructions.get(definition.instruction_index),
+                    Some(Instruction::Assign { name, .. }) if name == "y"
+                )
+            })
+            .map(|(_, definition)| definition)
+            .expect("else branch y assignment");
+
+        assert_eq!(else_definition.uses, vec![ValueId(0)]);
     }
 
     #[test]
