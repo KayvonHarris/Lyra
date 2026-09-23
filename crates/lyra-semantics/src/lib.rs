@@ -127,6 +127,17 @@ impl Analyzer {
                     for statement in &function.body.statements {
                         self.check_statement(statement);
                     }
+                    if self.current_return_type != Type::Unit
+                        && !Self::block_always_returns(&function.body.statements)
+                    {
+                        self.error(
+                            format!(
+                                "function `{}` may exit without returning {:?}",
+                                function.name, self.current_return_type
+                            ),
+                            function.span,
+                        );
+                    }
                     self.pop_scope();
                 }
             }
@@ -135,6 +146,25 @@ impl Analyzer {
         Analysis {
             diagnostics: self.diagnostics,
         }
+    }
+
+    fn block_always_returns(statements: &[Statement]) -> bool {
+        for statement in statements {
+            match statement {
+                Statement::Return { .. } => return true,
+                Statement::If {
+                    then_block,
+                    else_block: Some(else_block),
+                    ..
+                } if Self::block_always_returns(&then_block.statements)
+                    && Self::block_always_returns(&else_block.statements) =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     fn check_statement(&mut self, statement: &Statement) {
@@ -496,6 +526,26 @@ mod tests {
     fn accepts_well_typed_program() {
         let analysis =
             analyze_source("fn is_fast() -> Bool { let speed = 65.0; return speed >= 60; }");
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_unit_function_with_missing_return_path() {
+        let analysis = analyze_source(
+            "fn choose(flag: Bool) -> Int { if flag { return 42; } } fn main() -> Int { return 0; }",
+        );
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("may exit without returning Integer")
+        }));
+    }
+
+    #[test]
+    fn accepts_non_unit_function_when_both_branches_return() {
+        let analysis = analyze_source(
+            "fn choose(flag: Bool) -> Int { if flag { return 42; } else { return 0; } } fn main() -> Int { return choose(true); }",
+        );
         assert!(analysis.diagnostics.is_empty());
     }
 

@@ -981,7 +981,11 @@ mod tests {
 
     #[test]
     fn unterminated_cfg_blocks_are_explicitly_unreachable() {
-        let module = lower_source("fn main() -> Int { let value = 42; }");
+        let lexed = lyra_lexer::tokenize("fn main() -> Int { let value = 42; }");
+        assert!(lexed.diagnostics.is_empty());
+        let (ast, parser_diagnostics) = lyra_parser::parse(&lexed.tokens);
+        assert!(parser_diagnostics.is_empty());
+        let module = lower(&ast);
         let cfg = build_cfg(&module.functions[0].body);
         let entry = cfg.block(BlockId(0)).expect("entry block");
 
