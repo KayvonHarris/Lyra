@@ -257,6 +257,10 @@ impl<'a> FunctionEmitter<'a> {
         body: &mut String,
     ) -> Result<(), CodegenError> {
         match terminator {
+            Terminator::Unreachable => {
+                body.push_str("  unreachable\n");
+                Ok(())
+            }
             Terminator::Return { value, .. } => self.emit_return(value.as_ref(), return_type, body),
             Terminator::Jump { target, .. } => {
                 body.push_str(&format!("  br label %bb{}\n", target.0));
