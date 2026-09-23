@@ -140,7 +140,7 @@ impl Analyzer {
                         self.check_statement(statement);
                     }
                     if self.current_return_type != Type::Unit
-                        && !Self::block_always_returns(&function.body.statements)
+                        && !Self::block_never_falls_through(&function.body.statements)
                     {
                         self.error(
                             format!(
@@ -160,7 +160,7 @@ impl Analyzer {
         }
     }
 
-    fn block_always_returns(statements: &[Statement]) -> bool {
+    fn block_never_falls_through(statements: &[Statement]) -> bool {
         for statement in statements {
             match statement {
                 Statement::Return { .. } => return true,
@@ -168,11 +168,15 @@ impl Analyzer {
                     then_block,
                     else_block: Some(else_block),
                     ..
-                } if Self::block_always_returns(&then_block.statements)
-                    && Self::block_always_returns(&else_block.statements) =>
+                } if Self::block_never_falls_through(&then_block.statements)
+                    && Self::block_never_falls_through(&else_block.statements) =>
                 {
                     return true;
                 }
+                Statement::While {
+                    condition: Expression::Boolean(true, _),
+                    ..
+                } => return true,
                 _ => {}
             }
         }
@@ -706,6 +710,29 @@ mod tests {
         );
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains("argument 1") && diagnostic.message.contains("Integer")
+        }));
+    }
+
+    #[test]
+    fn accepts_non_unit_function_ending_in_while_true() {
+        let analysis =
+            analyze_source("fn spin() -> Int { while true { } } fn main() -> Int { return 0; }");
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+    }
+
+    #[test]
+    fn still_rejects_non_unit_function_ending_in_conditional_loop() {
+        let analysis = analyze_source(
+            "fn spin(flag: Bool) -> Int { while flag { } } fn main() -> Int { return 0; }",
+        );
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("function `spin` may exit without returning Integer")
         }));
     }
 
