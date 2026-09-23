@@ -601,6 +601,268 @@ mod tests {
     }
 
     #[test]
+    fn loop_condition_reads_header_phi_value() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "count".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "counter".into(),
+                                    value: Value::Binary {
+                                        left: Box::new(Value::Local("counter".into(), span)),
+                                        operator: BinaryOperator::Add,
+                                        right: Box::new(Value::Integer(1, span)),
+                                        span,
+                                    },
+                                    span,
+                                }],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("counter".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("loop-carried SSA should lower");
+        let phi_line = llvm
+            .lines()
+            .find(|line| line.contains(" = phi i64 "))
+            .expect("loop header phi");
+        let phi_register = phi_line.trim().split(" =").next().expect("phi register");
+        assert!(phi_line.contains("[ %ssa0, %entry ]"));
+        assert!(phi_line.contains("[ %ssa"));
+        assert!(llvm.contains(&format!("icmp slt i64 {phi_register}, 3")));
+        assert!(llvm.contains(&format!("add i64 {phi_register}, 1")));
+    }
+
+    #[test]
+    fn multiple_loop_carried_locals_use_distinct_header_phis() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "accumulate".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::BindMutable {
+                            name: "total".into(),
+                            value: Value::Integer(10, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![
+                                    Instruction::Assign {
+                                        name: "total".into(),
+                                        value: Value::Binary {
+                                            left: Box::new(Value::Local("total".into(), span)),
+                                            operator: BinaryOperator::Add,
+                                            right: Box::new(Value::Local("counter".into(), span)),
+                                            span,
+                                        },
+                                        span,
+                                    },
+                                    Instruction::Assign {
+                                        name: "counter".into(),
+                                        value: Value::Binary {
+                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            operator: BinaryOperator::Add,
+                                            right: Box::new(Value::Integer(1, span)),
+                                            span,
+                                        },
+                                        span,
+                                    },
+                                ],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("total".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("multiple loop-carried values should lower");
+        let phi_lines = llvm
+            .lines()
+            .filter(|line| line.contains(" = phi i64 "))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            phi_lines.len(),
+            2,
+            "expected one loop-header phi per carried local"
+        );
+        assert!(phi_lines.iter().all(|line| line.contains("%entry")));
+        assert!(
+            phi_lines
+                .iter()
+                .all(|line| line.matches("[ %ssa").count() == 2)
+        );
+
+        let phi_registers = phi_lines
+            .iter()
+            .map(|line| line.trim().split(" =").next().expect("phi register"))
+            .collect::<Vec<_>>();
+        assert_ne!(phi_registers[0], phi_registers[1]);
+        assert!(
+            llvm.contains(&format!("icmp slt i64 {}", phi_registers[0]))
+                || llvm.contains(&format!("icmp slt i64 {}", phi_registers[1]))
+        );
+        assert!(
+            llvm.contains(&format!("ret i64 {}", phi_registers[0]))
+                || llvm.contains(&format!("ret i64 {}", phi_registers[1]))
+        );
+    }
+
+    #[test]
+    fn loop_with_nested_branch_preserves_carried_ssa_value() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "branching_loop".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::BindMutable {
+                            name: "total".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![
+                                    Instruction::If {
+                                        condition: Value::Binary {
+                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            operator: BinaryOperator::Equal,
+                                            right: Box::new(Value::Integer(1, span)),
+                                            span,
+                                        },
+                                        then_block: Block {
+                                            instructions: vec![Instruction::Assign {
+                                                name: "total".into(),
+                                                value: Value::Binary {
+                                                    left: Box::new(Value::Local(
+                                                        "total".into(),
+                                                        span,
+                                                    )),
+                                                    operator: BinaryOperator::Add,
+                                                    right: Box::new(Value::Integer(10, span)),
+                                                    span,
+                                                },
+                                                span,
+                                            }],
+                                        },
+                                        else_block: Some(Block {
+                                            instructions: vec![Instruction::Assign {
+                                                name: "total".into(),
+                                                value: Value::Binary {
+                                                    left: Box::new(Value::Local(
+                                                        "total".into(),
+                                                        span,
+                                                    )),
+                                                    operator: BinaryOperator::Add,
+                                                    right: Box::new(Value::Integer(1, span)),
+                                                    span,
+                                                },
+                                                span,
+                                            }],
+                                        }),
+                                        span,
+                                    },
+                                    Instruction::Assign {
+                                        name: "counter".into(),
+                                        value: Value::Binary {
+                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            operator: BinaryOperator::Add,
+                                            right: Box::new(Value::Integer(1, span)),
+                                            span,
+                                        },
+                                        span,
+                                    },
+                                ],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("total".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("nested branch loop should lower");
+        let phi_lines = llvm
+            .lines()
+            .filter(|line| line.contains(" = phi i64 "))
+            .collect::<Vec<_>>();
+        assert!(
+            phi_lines.len() >= 3,
+            "expected loop-carried phis plus the nested branch merge"
+        );
+        assert!(llvm.contains("icmp eq i64"));
+        assert!(llvm.contains("add i64"));
+        assert!(
+            llvm.lines()
+                .any(|line| line.trim_start().starts_with("ret i64 %ssa"))
+        );
+    }
+
+    #[test]
     fn emits_cfg_phi_nodes() {
         let span = Span { start: 0, end: 0 };
         let module = Module {
@@ -702,6 +964,65 @@ mod tests {
             .expect("phi");
         let phi_register = phi_line.trim().split(" =").next().expect("phi register");
         assert!(llvm.contains(&format!("ret i64 {phi_register}")));
+    }
+
+    #[test]
+    fn loop_condition_reads_loop_carried_phi_value() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "count".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![Instruction::Assign {
+                                    name: "counter".into(),
+                                    value: Value::Binary {
+                                        left: Box::new(Value::Local("counter".into(), span)),
+                                        operator: BinaryOperator::Add,
+                                        right: Box::new(Value::Integer(1, span)),
+                                        span,
+                                    },
+                                    span,
+                                }],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("counter".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("loop-carried SSA should lower");
+        let phi_line = llvm
+            .lines()
+            .find(|line| line.contains(" = phi i64 "))
+            .expect("loop header phi");
+        let phi_register = phi_line.trim().split(" =").next().expect("phi register");
+        assert!(
+            llvm.lines()
+                .any(|line| line.contains("icmp slt i64") && line.contains(phi_register)),
+            "loop condition should read the loop-carried phi value: {llvm}"
+        );
     }
 
     #[test]

@@ -384,8 +384,7 @@ pub fn build_cfg(block: &Block) -> ControlFlowGraph {
     let mut builder = CfgBuilder::default();
     let entry = builder.new_block();
     builder.lower_block(block, entry);
-    builder.insert_phi_nodes();
-    let (entry_definitions, exit_definitions) = builder.compute_reaching_definitions();
+    let (entry_definitions, exit_definitions) = builder.construct_ssa();
     ControlFlowGraph {
         blocks: builder.blocks,
         entry_definitions,
@@ -427,45 +426,125 @@ impl CfgBuilder {
         self.terminated[id.0]
     }
 
-    fn compute_reaching_definitions(&self) -> (BlockDefinitionMap, BlockDefinitionMap) {
+    fn construct_ssa(&mut self) -> (BlockDefinitionMap, BlockDefinitionMap) {
         let mut entry: BlockDefinitionMap = HashMap::new();
         let mut exit: BlockDefinitionMap = HashMap::new();
-        let max_iterations = self.blocks.len().saturating_mul(4).max(1);
+        let mut phi_ids: HashMap<(BlockId, String), ValueId> = HashMap::new();
 
-        for _ in 0..max_iterations {
+        loop {
             let mut changed = false;
-            for block in &self.blocks {
-                let mut incoming = HashMap::new();
-                let predecessors = self.predecessors_of(block.id);
-                for predecessor in predecessors {
-                    if let Some(definitions) = exit.get(&predecessor) {
-                        for (name, id) in definitions {
-                            incoming.entry(name.clone()).or_insert(*id);
+
+            for block_index in 0..self.blocks.len() {
+                let block_id = BlockId(block_index);
+                let predecessors = self.predecessors_of(block_id);
+                let previous_entry = entry.get(&block_id).cloned().unwrap_or_default();
+                let previous_exit = exit.get(&block_id).cloned().unwrap_or_default();
+                let mut incoming = DefinitionMap::new();
+
+                if predecessors.len() == 1 {
+                    if let Some(definitions) = exit.get(&predecessors[0]) {
+                        incoming.extend(definitions.iter().map(|(name, id)| (name.clone(), *id)));
+                    }
+                } else if predecessors.len() >= 2 {
+                    let mut names = predecessors
+                        .iter()
+                        .filter_map(|predecessor| exit.get(predecessor))
+                        .flat_map(|definitions| definitions.keys().cloned())
+                        .collect::<Vec<_>>();
+                    names.sort();
+                    names.dedup();
+
+                    for name in names {
+                        let values = predecessors
+                            .iter()
+                            .map(|predecessor| {
+                                exit.get(predecessor)
+                                    .and_then(|definitions| definitions.get(&name))
+                                    .copied()
+                            })
+                            .collect::<Vec<_>>();
+                        let known = values.iter().flatten().copied().collect::<Vec<_>>();
+
+                        if known.is_empty() {
+                            continue;
                         }
+
+                        let all_predecessors_known = known.len() == predecessors.len();
+                        let first = known[0];
+                        let all_same = known.iter().all(|id| *id == first);
+
+                        if !all_predecessors_known {
+                            if all_same {
+                                incoming.insert(name, first);
+                            }
+                            continue;
+                        }
+
+                        let key = (block_id, name.clone());
+                        if all_same && !phi_ids.contains_key(&key) {
+                            incoming.insert(name, first);
+                            continue;
+                        }
+
+                        let phi_id = *phi_ids.entry(key).or_insert_with(|| {
+                            let id = ValueId(self.next_value);
+                            self.next_value += 1;
+                            id
+                        });
+                        let phi_incoming = predecessors
+                            .iter()
+                            .zip(values)
+                            .map(|(predecessor, value)| {
+                                (
+                                    *predecessor,
+                                    value.expect("all predecessor definitions known"),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+
+                        let block = &mut self.blocks[block_index];
+                        if let Some(phi) = block.phi_nodes.iter_mut().find(|phi| phi.name == name) {
+                            if phi.incoming != phi_incoming {
+                                phi.incoming = phi_incoming;
+                                changed = true;
+                            }
+                        } else {
+                            block.phi_nodes.push(PhiNode {
+                                id: phi_id,
+                                name: name.clone(),
+                                incoming: phi_incoming,
+                            });
+                            block
+                                .phi_nodes
+                                .sort_by(|left, right| left.name.cmp(&right.name));
+                            changed = true;
+                        }
+                        incoming.insert(name, phi_id);
                     }
                 }
-                for phi in &block.phi_nodes {
-                    incoming.insert(phi.name.clone(), phi.id);
-                }
 
-                if entry.get(&block.id) != Some(&incoming) {
-                    entry.insert(block.id, incoming.clone());
+                if previous_entry != incoming {
+                    entry.insert(block_id, incoming.clone());
                     changed = true;
                 }
 
                 let mut outgoing = incoming;
-                for definition in &block.definitions {
-                    if let Some(instruction) = block.instructions.get(definition.instruction_index)
+                for definition in &self.blocks[block_index].definitions {
+                    if let Some(instruction) = self.blocks[block_index]
+                        .instructions
+                        .get(definition.instruction_index)
                         && let Some(name) = defined_name(instruction)
                     {
                         outgoing.insert(name.to_owned(), definition.id);
                     }
                 }
-                if exit.get(&block.id) != Some(&outgoing) {
-                    exit.insert(block.id, outgoing);
+
+                if previous_exit != outgoing {
+                    exit.insert(block_id, outgoing);
                     changed = true;
                 }
             }
+
             if !changed {
                 break;
             }
@@ -474,96 +553,12 @@ impl CfgBuilder {
         (entry, exit)
     }
 
-    fn insert_phi_nodes(&mut self) {
-        let block_ids: Vec<BlockId> = self.blocks.iter().map(|block| block.id).collect();
-
-        for block_id in block_ids {
-            let predecessors = self.predecessors_of(block_id);
-            if predecessors.len() < 2 {
-                continue;
-            }
-
-            let mut incoming_by_name: HashMap<String, Vec<(BlockId, ValueId)>> = HashMap::new();
-            for predecessor in &predecessors {
-                for (name, id) in self.definitions_reaching_end(*predecessor) {
-                    incoming_by_name
-                        .entry(name)
-                        .or_default()
-                        .push((*predecessor, id));
-                }
-            }
-
-            // Loop headers need the preheader definition even when the back-edge
-            // definition lives in the loop body. Seed missing incoming values by
-            // walking backwards through single-predecessor chains.
-            for predecessor in &predecessors {
-                let inherited = self.inherited_definitions(*predecessor);
-                for (name, id) in inherited {
-                    let incoming = incoming_by_name.entry(name).or_default();
-                    if !incoming.iter().any(|(block, _)| block == predecessor) {
-                        incoming.push((*predecessor, id));
-                    }
-                }
-            }
-
-            let mut names: Vec<String> = incoming_by_name.keys().cloned().collect();
-            names.sort();
-            for name in names {
-                let incoming = incoming_by_name.remove(&name).unwrap_or_default();
-                if incoming.len() != predecessors.len() {
-                    continue;
-                }
-                let first = incoming[0].1;
-                if incoming.iter().all(|(_, id)| *id == first) {
-                    continue;
-                }
-
-                let id = ValueId(self.next_value);
-                self.next_value += 1;
-                self.blocks[block_id.0]
-                    .phi_nodes
-                    .push(PhiNode { id, name, incoming });
-            }
-        }
-    }
-
-    fn inherited_definitions(&self, mut block: BlockId) -> HashMap<String, ValueId> {
-        let mut definitions = self.definitions_reaching_end(block);
-        let mut visited = vec![block];
-
-        while definitions.is_empty() {
-            let predecessors = self.predecessors_of(block);
-            if predecessors.len() != 1 || visited.contains(&predecessors[0]) {
-                break;
-            }
-            block = predecessors[0];
-            visited.push(block);
-            definitions = self.definitions_reaching_end(block);
-        }
-
-        definitions
-    }
-
     fn predecessors_of(&self, id: BlockId) -> Vec<BlockId> {
         self.blocks
             .iter()
             .filter(|block| terminator_targets(&block.terminator).contains(&id))
             .map(|block| block.id)
             .collect()
-    }
-
-    fn definitions_reaching_end(&self, id: BlockId) -> HashMap<String, ValueId> {
-        let mut definitions = HashMap::new();
-        for definition in &self.blocks[id.0].definitions {
-            if let Some(instruction) = self.blocks[id.0]
-                .instructions
-                .get(definition.instruction_index)
-                && let Some(name) = defined_name(instruction)
-            {
-                definitions.insert(name.to_owned(), definition.id);
-            }
-        }
-        definitions
     }
 
     fn instruction_uses(&self, instruction: &Instruction) -> Vec<ValueId> {
@@ -1051,6 +1046,30 @@ mod tests {
 
         assert_eq!(cfg.definition_at_entry(merge.id, "value"), Some(ValueId(0)));
         assert_eq!(cfg.definition_at_exit(merge.id, "value"), Some(ValueId(0)));
+    }
+
+    #[test]
+    fn branch_merge_inherits_missing_definitions_per_variable() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; var total = 0; while counter < 3 { if counter == 1 { total = total + 10; } else { total = total + 1; } counter = counter + 1; } return total; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+
+        let nested_merge = cfg
+            .blocks
+            .iter()
+            .find(|block| {
+                cfg.predecessors(block.id).len() == 2
+                    && block.phi_nodes.iter().any(|phi| phi.name == "total")
+            })
+            .expect("nested branch merge with total phi");
+
+        assert!(
+            nested_merge
+                .phi_nodes
+                .iter()
+                .any(|phi| phi.name == "total" && phi.incoming.len() == 2)
+        );
     }
 
     #[test]
