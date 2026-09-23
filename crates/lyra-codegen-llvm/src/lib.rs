@@ -1047,11 +1047,12 @@ mod tests {
         };
 
         let llvm = emit_llvm_ir(&module).expect("mutable local should lower");
-        assert!(llvm.contains("%counter.addr = alloca i64"));
         assert!(llvm.contains("%ssa0 = add i64 0, 0"));
-        assert!(llvm.contains("store i64 %ssa0, ptr %counter.addr"));
         assert!(llvm.contains("%ssa1 = add i64 %"));
-        assert!(llvm.contains("store i64 %ssa1, ptr %counter.addr"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit"));
+        assert!(!llvm.contains("alloca i64"));
+        assert!(!llvm.contains("store i64"));
+        assert!(!llvm.contains("load i64"));
     }
 
     #[test]
