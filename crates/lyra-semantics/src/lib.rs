@@ -60,6 +60,21 @@ impl Analyzer {
                     );
                 }
                 Item::Function(function) => {
+                    for parameter in &function.parameters {
+                        if let Some(type_name) = &parameter.type_name
+                            && Self::type_from_name(type_name) == Type::Unknown
+                        {
+                            self.error(
+                                format!("unknown type `{}`", type_name.name),
+                                type_name.span,
+                            );
+                        }
+                    }
+                    if let Some(type_name) = &function.return_type
+                        && Self::type_from_name(type_name) == Type::Unknown
+                    {
+                        self.error(format!("unknown type `{}`", type_name.name), type_name.span);
+                    }
                     if function.name == "main" && !function.parameters.is_empty() {
                         self.error("`main` cannot declare parameters yet", function.span);
                     }
@@ -734,6 +749,31 @@ mod tests {
                 .message
                 .contains("function `spin` may exit without returning Integer")
         }));
+    }
+
+    #[test]
+    fn rejects_unknown_parameter_type() {
+        let analysis = analyze_source(
+            "fn consume(value: Mystery) -> Int { return 0; } fn main() -> Int { return 0; }",
+        );
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown type `Mystery`"))
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_return_type() {
+        let analysis =
+            analyze_source("fn mystery() -> Mystery { return 0; } fn main() -> Int { return 0; }");
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown type `Mystery`"))
+        );
     }
 
     #[test]
