@@ -83,6 +83,7 @@ impl ValueTable {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Terminator {
+    Unreachable,
     Return {
         value: Option<Value>,
         span: Span,
@@ -175,7 +176,7 @@ impl ControlFlowGraph {
         };
 
         match &block.terminator {
-            Terminator::Return { .. } => Vec::new(),
+            Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
             Terminator::Jump { target, .. } => vec![*target],
             Terminator::Branch {
                 then_target,
@@ -405,10 +406,7 @@ impl CfgBuilder {
         self.blocks.push(BasicBlock {
             id,
             instructions: Vec::new(),
-            terminator: Terminator::Return {
-                value: None,
-                span: Span::default(),
-            },
+            terminator: Terminator::Unreachable,
             definitions: Vec::new(),
             phi_nodes: Vec::new(),
         });
@@ -749,7 +747,7 @@ fn collect_value_uses_from_environment(
 
 fn terminator_targets(terminator: &Terminator) -> Vec<BlockId> {
     match terminator {
-        Terminator::Return { .. } => Vec::new(),
+        Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
         Terminator::Jump { target, .. } => vec![*target],
         Terminator::Branch {
             then_target,
@@ -979,6 +977,16 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn unterminated_cfg_blocks_are_explicitly_unreachable() {
+        let module = lower_source("fn main() -> Int { let value = 42; }");
+        let cfg = build_cfg(&module.functions[0].body);
+        let entry = cfg.block(BlockId(0)).expect("entry block");
+
+        assert!(matches!(entry.terminator, Terminator::Unreachable));
+        assert!(cfg.successors(entry.id).is_empty());
     }
 
     #[test]
