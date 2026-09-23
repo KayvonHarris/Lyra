@@ -690,10 +690,7 @@ mod tests {
                                     Instruction::Assign {
                                         name: "total".into(),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local(
-                                                        "total".into(),
-                                                        span,
-                                                    )),
+                                            left: Box::new(Value::Local("total".into(), span)),
                                             operator: BinaryOperator::Add,
                                             right: Box::new(Value::Local("counter".into(), span)),
                                             span,
