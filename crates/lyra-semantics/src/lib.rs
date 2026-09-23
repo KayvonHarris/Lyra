@@ -173,6 +173,9 @@ impl Analyzer {
                 name, value, span, ..
             } => {
                 let ty = self.check_expression(value);
+                if ty == Type::Unit {
+                    self.error("cannot bind a Unit expression to a variable", value.span());
+                }
                 let duplicate = self
                     .scopes
                     .last()
@@ -193,6 +196,9 @@ impl Analyzer {
                 name, value, span, ..
             } => {
                 let ty = self.check_expression(value);
+                if ty == Type::Unit {
+                    self.error("cannot bind a Unit expression to a variable", value.span());
+                }
                 let duplicate = self
                     .scopes
                     .last()
@@ -376,6 +382,7 @@ impl Analyzer {
                 span,
             } => {
                 let operand_type = self.check_expression(operand);
+                let operand_type = self.reject_unit_operand(operand_type, operand.span());
                 self.check_unary(*operator, operand_type, *span)
             }
             Expression::Binary {
@@ -386,8 +393,19 @@ impl Analyzer {
             } => {
                 let left_type = self.check_expression(left);
                 let right_type = self.check_expression(right);
+                let left_type = self.reject_unit_operand(left_type, left.span());
+                let right_type = self.reject_unit_operand(right_type, right.span());
                 self.check_binary(left_type, *operator, right_type, *span)
             }
+        }
+    }
+
+    fn reject_unit_operand(&mut self, ty: Type, span: Span) -> Type {
+        if ty == Type::Unit {
+            self.error("Unit expression cannot be used as a value", span);
+            Type::Unknown
+        } else {
+            ty
         }
     }
 
@@ -677,6 +695,27 @@ mod tests {
         assert!(analysis.diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains("argument 1") && diagnostic.message.contains("Integer")
         }));
+    }
+
+    #[test]
+    fn rejects_binding_unit_call_result() {
+        let analysis = analyze_source(
+            "fn log() -> Unit { return; } fn main() -> Int { let result = log(); return 0; }",
+        );
+        assert!(analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("cannot bind a Unit expression")));
+    }
+
+    #[test]
+    fn rejects_unit_call_in_arithmetic() {
+        let analysis =
+            analyze_source("fn log() -> Unit { return; } fn main() -> Int { return log() + 1; }");
+        assert!(analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("Unit expression cannot be used as a value")));
     }
 
     #[test]
