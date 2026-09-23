@@ -726,19 +726,31 @@ mod tests {
             .lines()
             .filter(|line| line.contains(" = phi i64 "))
             .collect::<Vec<_>>();
-        assert_eq!(phi_lines.len(), 2, "expected one loop-header phi per carried local");
+        assert_eq!(
+            phi_lines.len(),
+            2,
+            "expected one loop-header phi per carried local"
+        );
         assert!(phi_lines.iter().all(|line| line.contains("%entry")));
-        assert!(phi_lines.iter().all(|line| line.matches("[ %ssa").count() == 2));
+        assert!(
+            phi_lines
+                .iter()
+                .all(|line| line.matches("[ %ssa").count() == 2)
+        );
 
         let phi_registers = phi_lines
             .iter()
             .map(|line| line.trim().split(" =").next().expect("phi register"))
             .collect::<Vec<_>>();
         assert_ne!(phi_registers[0], phi_registers[1]);
-        assert!(llvm.contains(&format!("icmp slt i64 {}", phi_registers[0]))
-            || llvm.contains(&format!("icmp slt i64 {}", phi_registers[1])));
-        assert!(llvm.contains(&format!("ret i64 {}", phi_registers[0]))
-            || llvm.contains(&format!("ret i64 {}", phi_registers[1])));
+        assert!(
+            llvm.contains(&format!("icmp slt i64 {}", phi_registers[0]))
+                || llvm.contains(&format!("icmp slt i64 {}", phi_registers[1]))
+        );
+        assert!(
+            llvm.contains(&format!("ret i64 {}", phi_registers[0]))
+                || llvm.contains(&format!("ret i64 {}", phi_registers[1]))
+        );
     }
 
     #[test]
