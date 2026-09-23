@@ -1158,7 +1158,12 @@ mod tests {
         let else_definition = cfg
             .blocks
             .iter()
-            .flat_map(|block| block.definitions.iter().map(move |definition| (block, definition)))
+            .flat_map(|block| {
+                block
+                    .definitions
+                    .iter()
+                    .map(move |definition| (block, definition))
+            })
             .find(|(block, definition)| {
                 matches!(
                     block.instructions.get(definition.instruction_index),
