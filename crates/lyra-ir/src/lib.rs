@@ -495,7 +495,10 @@ impl CfgBuilder {
                             .iter()
                             .zip(values.into_iter())
                             .map(|(predecessor, value)| {
-                                (*predecessor, value.expect("all predecessor definitions known"))
+                                (
+                                    *predecessor,
+                                    value.expect("all predecessor definitions known"),
+                                )
                             })
                             .collect::<Vec<_>>();
 
@@ -511,7 +514,9 @@ impl CfgBuilder {
                                 name: name.clone(),
                                 incoming: phi_incoming,
                             });
-                            block.phi_nodes.sort_by(|left, right| left.name.cmp(&right.name));
+                            block
+                                .phi_nodes
+                                .sort_by(|left, right| left.name.cmp(&right.name));
                             changed = true;
                         }
                         incoming.insert(name, phi_id);
