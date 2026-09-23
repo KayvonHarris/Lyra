@@ -109,7 +109,7 @@ fn llvm_type(ty: Type) -> Result<&'static str, CodegenError> {
     match ty {
         Type::Integer | Type::Boolean => Ok("i64"),
         Type::Float => Ok("double"),
-        Type::Unit => Ok("i64"),
+        Type::Unit => Ok("void"),
         Type::String => Err(CodegenError::Unsupported("string function types")),
         Type::Unknown => Err(CodegenError::Unsupported("unknown function types")),
     }
@@ -117,7 +117,8 @@ fn llvm_type(ty: Type) -> Result<&'static str, CodegenError> {
 
 fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
     match ty {
-        Type::Integer | Type::Boolean | Type::Unit => Ok("0"),
+        Type::Integer | Type::Boolean => Ok("0"),
+        Type::Unit => Err(CodegenError::Unsupported("Unit has no value")),
         Type::Float => Ok("0.0"),
         Type::String => Err(CodegenError::Unsupported("string function types")),
         Type::Unknown => Err(CodegenError::Unsupported("unknown function types")),
@@ -257,6 +258,10 @@ impl<'a> FunctionEmitter<'a> {
         body: &mut String,
     ) -> Result<(), CodegenError> {
         match terminator {
+            Terminator::Unreachable if return_type == Type::Unit => {
+                body.push_str("  ret void\n");
+                Ok(())
+            }
             Terminator::Unreachable => {
                 body.push_str("  unreachable\n");
                 Ok(())
@@ -290,6 +295,16 @@ impl<'a> FunctionEmitter<'a> {
         return_type: Type,
         body: &mut String,
     ) -> Result<(), CodegenError> {
+        if return_type == Type::Unit {
+            if value.is_some() {
+                return Err(CodegenError::Unsupported(
+                    "Unit return cannot carry a value",
+                ));
+            }
+            body.push_str("  ret void\n");
+            return Ok(());
+        }
+
         let ty = llvm_type(return_type)?;
         if let Some(value) = value {
             let operand = self.emit_value(value, body)?;
@@ -402,6 +417,50 @@ mod tests {
     use super::*;
     use lyra_ir::{Block, Function, Type};
     use lyra_span::Span;
+
+    #[test]
+    fn emits_explicit_unit_return_as_void() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "log".into(),
+                parameters: vec![],
+                return_type: Type::Unit,
+                body: Block {
+                    instructions: vec![Instruction::Return { value: None, span }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("Unit return should lower");
+        assert!(llvm.contains("define void @log()"));
+        assert!(llvm.contains("ret void"));
+    }
+
+    #[test]
+    fn emits_implicit_unit_fallthrough_as_void_return() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "log".into(),
+                parameters: vec![],
+                return_type: Type::Unit,
+                body: Block {
+                    instructions: vec![Instruction::Evaluate {
+                        value: Value::Integer(42, span),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("Unit fallthrough should lower");
+        assert!(llvm.contains("define void @log()"));
+        assert!(llvm.contains("ret void"));
+        assert!(!llvm.contains("ret i64 0"));
+    }
 
     #[test]
     fn stops_emitting_after_return() {
