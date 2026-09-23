@@ -173,11 +173,10 @@ impl Analyzer {
                 {
                     return true;
                 }
-                Statement::While { condition, .. }
-                    if matches!(condition, Expression::Boolean(true, _)) =>
-                {
-                    return true;
-                }
+                Statement::While {
+                    condition: Expression::Boolean(true, _),
+                    ..
+                } => return true,
                 _ => {}
             }
         }
