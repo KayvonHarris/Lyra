@@ -82,13 +82,20 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
 
 fn normalize_main_returns(body: &str) -> String {
     let mut output = String::new();
+    let mut exit_index = 0usize;
     for line in body.lines() {
         if let Some(value) = line.trim().strip_prefix("ret i64 ") {
             if let Ok(value) = value.parse::<i64>() {
                 output.push_str(&format!("  ret i32 {}\n", value as i32));
             } else {
-                output.push_str(&format!("  %lyra.main.exit = trunc i64 {value} to i32\n"));
-                output.push_str("  ret i32 %lyra.main.exit\n");
+                let exit_register = if exit_index == 0 {
+                    "%lyra.main.exit".to_owned()
+                } else {
+                    format!("%lyra.main.exit.{exit_index}")
+                };
+                exit_index += 1;
+                output.push_str(&format!("  {exit_register} = trunc i64 {value} to i32\n"));
+                output.push_str(&format!("  ret i32 {exit_register}\n"));
             }
         } else {
             output.push_str(line);
@@ -419,6 +426,53 @@ mod tests {
         let llvm = emit_llvm_ir(&module).expect("codegen should succeed");
         assert!(llvm.contains("ret i32 7"));
         assert!(!llvm.contains("99"));
+    }
+
+    #[test]
+    fn main_multiple_register_returns_use_unique_exit_registers() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "main".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![Instruction::If {
+                        condition: Value::Boolean(true, span),
+                        then_block: Block {
+                            instructions: vec![Instruction::Return {
+                                value: Some(Value::Binary {
+                                    left: Box::new(Value::Integer(20, span)),
+                                    operator: BinaryOperator::Add,
+                                    right: Box::new(Value::Integer(22, span)),
+                                    span,
+                                }),
+                                span,
+                            }],
+                        },
+                        else_block: Some(Block {
+                            instructions: vec![Instruction::Return {
+                                value: Some(Value::Binary {
+                                    left: Box::new(Value::Integer(40, span)),
+                                    operator: BinaryOperator::Add,
+                                    right: Box::new(Value::Integer(2, span)),
+                                    span,
+                                }),
+                                span,
+                            }],
+                        }),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("multiple register returns should lower");
+        assert_eq!(llvm.matches("%lyra.main.exit = trunc").count(), 1);
+        assert_eq!(llvm.matches("%lyra.main.exit.1 = trunc").count(), 1);
+        assert!(llvm.contains("ret i32 %lyra.main.exit\n"));
+        assert!(llvm.contains("ret i32 %lyra.main.exit.1\n"));
     }
 
     #[test]
