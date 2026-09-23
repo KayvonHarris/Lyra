@@ -120,7 +120,6 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 struct FunctionEmitter<'a> {
     next_register: usize,
     locals: HashMap<String, String>,
-    mutable_locals: HashMap<String, String>,
     signatures: &'a HashMap<String, Type>,
     ssa_locals: HashMap<String, String>,
 }
@@ -130,7 +129,6 @@ impl<'a> FunctionEmitter<'a> {
         Self {
             next_register: 0,
             locals: HashMap::new(),
-            mutable_locals: HashMap::new(),
             signatures,
             ssa_locals: HashMap::new(),
         }
@@ -209,22 +207,14 @@ impl<'a> FunctionEmitter<'a> {
                 Instruction::BindMutable { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    let slot = format!("%{name}.addr");
-                    body.push_str(&format!("  {slot} = alloca i64\n"));
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                    self.ssa_locals.insert(name.clone(), operand);
-                    self.mutable_locals.insert(name.clone(), slot);
+                    self.ssa_locals.insert(name.clone(), operand.clone());
+                    self.locals.insert(name.clone(), operand);
                 }
                 Instruction::Assign { name, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    let slot = self
-                        .mutable_locals
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))?;
-                    body.push_str(&format!("  store i64 {operand}, ptr {slot}\n"));
-                    self.ssa_locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(name.clone(), operand.clone());
+                    self.locals.insert(name.clone(), operand);
                 }
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
@@ -306,10 +296,6 @@ impl<'a> FunctionEmitter<'a> {
             Value::Local(name, _) => {
                 if let Some(value) = self.ssa_locals.get(name).cloned() {
                     Ok(value)
-                } else if let Some(slot) = self.mutable_locals.get(name).cloned() {
-                    let register = self.register();
-                    body.push_str(&format!("  {register} = load i64, ptr {slot}\n"));
-                    Ok(register)
                 } else {
                     self.locals
                         .get(name)
@@ -1026,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn emits_mutable_local_storage_and_updates() {
+    fn emits_mutable_local_ssa_updates_without_stack_storage() {
         let span = Span { start: 0, end: 0 };
         let module = Module {
             functions: vec![Function {
