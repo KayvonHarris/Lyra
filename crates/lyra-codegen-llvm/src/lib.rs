@@ -342,6 +342,11 @@ impl<'a> FunctionEmitter<'a> {
                     let operand = self.emit_value(argument, body)?;
                     operands.push(format!("i64 {operand}"));
                 }
+                if return_type == Type::Unit {
+                    body.push_str(&format!("  call void @{callee}({})\n", operands.join(", ")));
+                    return Ok(String::new());
+                }
+
                 let register = self.register();
                 body.push_str(&format!(
                     "  {register} = call {} @{callee}({})\n",
@@ -417,6 +422,50 @@ mod tests {
     use super::*;
     use lyra_ir::{Block, Function, Type};
     use lyra_span::Span;
+
+    #[test]
+    fn emits_unit_call_without_result_register() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![
+                Function {
+                    name: "log".into(),
+                    parameters: vec![],
+                    return_type: Type::Unit,
+                    body: Block {
+                        instructions: vec![Instruction::Return { value: None, span }],
+                    },
+                    span,
+                },
+                Function {
+                    name: "main".into(),
+                    parameters: vec![],
+                    return_type: Type::Integer,
+                    body: Block {
+                        instructions: vec![
+                            Instruction::Evaluate {
+                                value: Value::Call {
+                                    callee: "log".into(),
+                                    arguments: vec![],
+                                    span,
+                                },
+                                span,
+                            },
+                            Instruction::Return {
+                                value: Some(Value::Integer(0, span)),
+                                span,
+                            },
+                        ],
+                    },
+                    span,
+                },
+            ],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("Unit call should lower");
+        assert!(llvm.contains("call void @log()"));
+        assert!(!llvm.contains("= call void @log()"));
+    }
 
     #[test]
     fn emits_explicit_unit_return_as_void() {
