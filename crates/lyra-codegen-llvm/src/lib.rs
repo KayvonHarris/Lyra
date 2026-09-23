@@ -754,6 +754,106 @@ mod tests {
     }
 
     #[test]
+    fn loop_with_nested_branch_preserves_carried_ssa_value() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "branching_loop".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::BindMutable {
+                            name: "total".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![
+                                    Instruction::If {
+                                        condition: Value::Binary {
+                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            operator: BinaryOperator::Equal,
+                                            right: Box::new(Value::Integer(1, span)),
+                                            span,
+                                        },
+                                        then_block: Block {
+                                            instructions: vec![Instruction::Assign {
+                                                name: "total".into(),
+                                                value: Value::Binary {
+                                                    left: Box::new(Value::Local("total".into(), span)),
+                                                    operator: BinaryOperator::Add,
+                                                    right: Box::new(Value::Integer(10, span)),
+                                                    span,
+                                                },
+                                                span,
+                                            }],
+                                        },
+                                        else_block: Some(Block {
+                                            instructions: vec![Instruction::Assign {
+                                                name: "total".into(),
+                                                value: Value::Binary {
+                                                    left: Box::new(Value::Local("total".into(), span)),
+                                                    operator: BinaryOperator::Add,
+                                                    right: Box::new(Value::Integer(1, span)),
+                                                    span,
+                                                },
+                                                span,
+                                            }],
+                                        }),
+                                        span,
+                                    },
+                                    Instruction::Assign {
+                                        name: "counter".into(),
+                                        value: Value::Binary {
+                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            operator: BinaryOperator::Add,
+                                            right: Box::new(Value::Integer(1, span)),
+                                            span,
+                                        },
+                                        span,
+                                    },
+                                ],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("total".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("nested branch loop should lower");
+        let phi_lines = llvm
+            .lines()
+            .filter(|line| line.contains(" = phi i64 "))
+            .collect::<Vec<_>>();
+        assert!(
+            phi_lines.len() >= 3,
+            "expected loop-carried phis plus the nested branch merge"
+        );
+        assert!(llvm.contains("icmp eq i64"));
+        assert!(llvm.contains("add i64"));
+        assert!(llvm.lines().any(|line| line.trim_start().starts_with("ret i64 %ssa")));
+    }
+
+    #[test]
     fn emits_cfg_phi_nodes() {
         let span = Span { start: 0, end: 0 };
         let module = Module {
