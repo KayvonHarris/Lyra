@@ -297,7 +297,9 @@ impl<'a> FunctionEmitter<'a> {
     ) -> Result<(), CodegenError> {
         if return_type == Type::Unit {
             if value.is_some() {
-                return Err(CodegenError::Unsupported("Unit return cannot carry a value"));
+                return Err(CodegenError::Unsupported(
+                    "Unit return cannot carry a value",
+                ));
             }
             body.push_str("  ret void\n");
             return Ok(());
