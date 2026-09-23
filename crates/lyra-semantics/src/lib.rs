@@ -61,22 +61,22 @@ impl Analyzer {
                 }
                 Item::Function(function) => {
                     for parameter in &function.parameters {
-                        if let Some(type_name) = &parameter.type_name {
-                            if Self::type_from_name(type_name) == Type::Unknown {
-                                self.error(
-                                    format!("unknown type `{}`", type_name.name),
-                                    type_name.span,
-                                );
-                            }
-                        }
-                    }
-                    if let Some(type_name) = &function.return_type {
-                        if Self::type_from_name(type_name) == Type::Unknown {
+                        if let Some(type_name) = &parameter.type_name
+                            && Self::type_from_name(type_name) == Type::Unknown
+                        {
                             self.error(
                                 format!("unknown type `{}`", type_name.name),
                                 type_name.span,
                             );
                         }
+                    }
+                    if let Some(type_name) = &function.return_type
+                        && Self::type_from_name(type_name) == Type::Unknown
+                    {
+                        self.error(
+                            format!("unknown type `{}`", type_name.name),
+                            type_name.span,
+                        );
                     }
                     if function.name == "main" && !function.parameters.is_empty() {
                         self.error("`main` cannot declare parameters yet", function.span);
