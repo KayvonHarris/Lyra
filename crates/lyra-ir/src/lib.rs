@@ -690,7 +690,7 @@ impl CfgBuilder {
                     let instruction_index = self.blocks[current.0].instructions.len();
                     self.blocks[current.0].instructions.push(other.clone());
 
-                    if let Some(name) = defined_name(other) {
+                    if defined_name(other).is_some() {
                         let id = ValueId(self.next_value);
                         self.next_value += 1;
                         self.blocks[current.0].definitions.push(ValueDefinition {
