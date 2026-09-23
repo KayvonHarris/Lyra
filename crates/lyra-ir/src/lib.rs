@@ -528,17 +528,27 @@ impl CfgBuilder {
     }
 
     fn inherited_definitions(&self, mut block: BlockId) -> HashMap<String, ValueId> {
-        let mut definitions = self.definitions_reaching_end(block);
-        let mut visited = vec![block];
+        let mut definitions = HashMap::new();
+        let mut visited = Vec::new();
 
-        while definitions.is_empty() {
+        loop {
+            if visited.contains(&block) {
+                break;
+            }
+            visited.push(block);
+
+            for (name, id) in self.definitions_reaching_end(block) {
+                definitions.entry(name).or_insert(id);
+            }
+            for phi in &self.blocks[block.0].phi_nodes {
+                definitions.entry(phi.name.clone()).or_insert(phi.id);
+            }
+
             let predecessors = self.predecessors_of(block);
-            if predecessors.len() != 1 || visited.contains(&predecessors[0]) {
+            if predecessors.len() != 1 {
                 break;
             }
             block = predecessors[0];
-            visited.push(block);
-            definitions = self.definitions_reaching_end(block);
         }
 
         definitions
@@ -1051,6 +1061,30 @@ mod tests {
 
         assert_eq!(cfg.definition_at_entry(merge.id, "value"), Some(ValueId(0)));
         assert_eq!(cfg.definition_at_exit(merge.id, "value"), Some(ValueId(0)));
+    }
+
+    #[test]
+    fn branch_merge_inherits_missing_definitions_per_variable() {
+        let module = lower_source(
+            "fn main() -> Int { var counter = 0; var total = 0; while counter < 3 { if counter == 1 { total = total + 10; } else { total = total + 1; } counter = counter + 1; } return total; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+
+        let nested_merge = cfg
+            .blocks
+            .iter()
+            .find(|block| {
+                cfg.predecessors(block.id).len() == 2
+                    && block.phi_nodes.iter().any(|phi| phi.name == "total")
+            })
+            .expect("nested branch merge with total phi");
+
+        assert!(
+            nested_merge
+                .phi_nodes
+                .iter()
+                .any(|phi| phi.name == "total" && phi.incoming.len() == 2)
+        );
     }
 
     #[test]
