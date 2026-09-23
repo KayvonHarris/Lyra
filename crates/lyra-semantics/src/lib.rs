@@ -680,6 +680,26 @@ mod tests {
     }
 
     #[test]
+    fn accepts_explicit_unit_return() {
+        let analysis = analyze_source("fn log() -> Unit { return; } fn main() -> Int { return 0; }");
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn accepts_implicit_unit_fallthrough() {
+        let analysis = analyze_source("fn log() -> Unit { let value = 42; } fn main() -> Int { return 0; }");
+        assert!(analysis.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn rejects_value_return_from_unit_function() {
+        let analysis = analyze_source("fn log() -> Unit { return 42; } fn main() -> Int { return 0; }");
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("return type mismatch")
+        }));
+    }
+
+    #[test]
     fn rejects_typed_return_mismatch() {
         let analysis = analyze_source("fn answer() -> Bool { return 42; }");
         assert!(
