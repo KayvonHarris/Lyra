@@ -659,6 +659,89 @@ mod tests {
     }
 
     #[test]
+    fn multiple_loop_carried_locals_use_distinct_header_phis() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "accumulate".into(),
+                parameters: vec![],
+                return_type: Type::Integer,
+                body: Block {
+                    instructions: vec![
+                        Instruction::BindMutable {
+                            name: "counter".into(),
+                            value: Value::Integer(0, span),
+                            span,
+                        },
+                        Instruction::BindMutable {
+                            name: "total".into(),
+                            value: Value::Integer(10, span),
+                            span,
+                        },
+                        Instruction::While {
+                            condition: Value::Binary {
+                                left: Box::new(Value::Local("counter".into(), span)),
+                                operator: BinaryOperator::Less,
+                                right: Box::new(Value::Integer(3, span)),
+                                span,
+                            },
+                            body: Block {
+                                instructions: vec![
+                                    Instruction::Assign {
+                                        name: "total".into(),
+                                        value: Value::Binary {
+                                            left: Box::new(Value::Local("total".into(), span)),
+                                            operator: BinaryOperator::Add,
+                                            right: Box::new(Value::Local("counter".into(), span)),
+                                            span,
+                                        },
+                                        span,
+                                    },
+                                    Instruction::Assign {
+                                        name: "counter".into(),
+                                        value: Value::Binary {
+                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            operator: BinaryOperator::Add,
+                                            right: Box::new(Value::Integer(1, span)),
+                                            span,
+                                        },
+                                        span,
+                                    },
+                                ],
+                            },
+                            span,
+                        },
+                        Instruction::Return {
+                            value: Some(Value::Local("total".into(), span)),
+                            span,
+                        },
+                    ],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("multiple loop-carried values should lower");
+        let phi_lines = llvm
+            .lines()
+            .filter(|line| line.contains(" = phi i64 "))
+            .collect::<Vec<_>>();
+        assert_eq!(phi_lines.len(), 2, "expected one loop-header phi per carried local");
+        assert!(phi_lines.iter().all(|line| line.contains("%entry")));
+        assert!(phi_lines.iter().all(|line| line.matches("[ %ssa").count() == 2));
+
+        let phi_registers = phi_lines
+            .iter()
+            .map(|line| line.trim().split(" =").next().expect("phi register"))
+            .collect::<Vec<_>>();
+        assert_ne!(phi_registers[0], phi_registers[1]);
+        assert!(llvm.contains(&format!("icmp slt i64 {}", phi_registers[0]))
+            || llvm.contains(&format!("icmp slt i64 {}", phi_registers[1])));
+        assert!(llvm.contains(&format!("ret i64 {}", phi_registers[0]))
+            || llvm.contains(&format!("ret i64 {}", phi_registers[1])));
+    }
+
+    #[test]
     fn emits_cfg_phi_nodes() {
         let span = Span { start: 0, end: 0 };
         let module = Module {
