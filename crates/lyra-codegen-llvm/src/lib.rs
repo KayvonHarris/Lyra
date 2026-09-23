@@ -690,7 +690,10 @@ mod tests {
                                     Instruction::Assign {
                                         name: "total".into(),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local("total".into(), span)),
+                                            left: Box::new(Value::Local(
+                                                        "total".into(),
+                                                        span,
+                                                    )),
                                             operator: BinaryOperator::Add,
                                             right: Box::new(Value::Local("counter".into(), span)),
                                             span,
@@ -793,7 +796,10 @@ mod tests {
                                             instructions: vec![Instruction::Assign {
                                                 name: "total".into(),
                                                 value: Value::Binary {
-                                                    left: Box::new(Value::Local("total".into(), span)),
+                                                    left: Box::new(Value::Local(
+                                                        "total".into(),
+                                                        span,
+                                                    )),
                                                     operator: BinaryOperator::Add,
                                                     right: Box::new(Value::Integer(10, span)),
                                                     span,
@@ -805,7 +811,10 @@ mod tests {
                                             instructions: vec![Instruction::Assign {
                                                 name: "total".into(),
                                                 value: Value::Binary {
-                                                    left: Box::new(Value::Local("total".into(), span)),
+                                                    left: Box::new(Value::Local(
+                                                        "total".into(),
+                                                        span,
+                                                    )),
                                                     operator: BinaryOperator::Add,
                                                     right: Box::new(Value::Integer(1, span)),
                                                     span,
@@ -850,7 +859,10 @@ mod tests {
         );
         assert!(llvm.contains("icmp eq i64"));
         assert!(llvm.contains("add i64"));
-        assert!(llvm.lines().any(|line| line.trim_start().starts_with("ret i64 %ssa")));
+        assert!(
+            llvm.lines()
+                .any(|line| line.trim_start().starts_with("ret i64 %ssa"))
+        );
     }
 
     #[test]
