@@ -493,7 +493,7 @@ impl CfgBuilder {
                         });
                         let phi_incoming = predecessors
                             .iter()
-                            .zip(values.into_iter())
+                            .zip(values)
                             .map(|(predecessor, value)| {
                                 (
                                     *predecessor,
@@ -559,20 +559,6 @@ impl CfgBuilder {
             .filter(|block| terminator_targets(&block.terminator).contains(&id))
             .map(|block| block.id)
             .collect()
-    }
-
-    fn definitions_reaching_end(&self, id: BlockId) -> HashMap<String, ValueId> {
-        let mut definitions = HashMap::new();
-        for definition in &self.blocks[id.0].definitions {
-            if let Some(instruction) = self.blocks[id.0]
-                .instructions
-                .get(definition.instruction_index)
-                && let Some(name) = defined_name(instruction)
-            {
-                definitions.insert(name.to_owned(), definition.id);
-            }
-        }
-        definitions
     }
 
     fn instruction_uses(&self, instruction: &Instruction) -> Vec<ValueId> {
