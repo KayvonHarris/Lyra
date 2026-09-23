@@ -702,20 +702,23 @@ mod tests {
         let analysis = analyze_source(
             "fn log() -> Unit { return; } fn main() -> Int { let result = log(); return 0; }",
         );
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("cannot bind a Unit expression")));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("cannot bind a Unit expression"))
+        );
     }
 
     #[test]
     fn rejects_unit_call_in_arithmetic() {
         let analysis =
             analyze_source("fn log() -> Unit { return; } fn main() -> Int { return log() + 1; }");
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("Unit expression cannot be used as a value")));
+        assert!(analysis.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Unit expression cannot be used as a value")
+        }));
     }
 
     #[test]
