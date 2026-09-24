@@ -178,12 +178,24 @@ impl Analyzer {
 
         for statement in statements {
             if !reachable {
-                self.error("unreachable statement", statement.span());
+                self.error("unreachable statement", Self::statement_span(statement));
                 continue;
             }
 
             self.check_statement(statement);
             reachable = !Self::statement_never_falls_through(statement);
+        }
+    }
+
+    fn statement_span(statement: &Statement) -> Span {
+        match statement {
+            Statement::Let { span, .. }
+            | Statement::Var { span, .. }
+            | Statement::Assign { span, .. }
+            | Statement::Return { span, .. }
+            | Statement::If { span, .. }
+            | Statement::While { span, .. }
+            | Statement::Expression { span, .. } => *span,
         }
     }
 
