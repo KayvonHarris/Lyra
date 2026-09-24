@@ -263,7 +263,7 @@ impl<'a> FunctionEmitter<'a> {
                 Ok(())
             }
             Terminator::Open => Err(CodegenError::Unsupported(
-                "open CFG block reached LLVM code generation".into(),
+                "open CFG block reached LLVM code generation",
             )),
             Terminator::Unreachable if return_type == Type::Unit => {
                 body.push_str("  ret void\n");
