@@ -83,6 +83,9 @@ impl ValueTable {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Terminator {
+    /// Builder state for a block that has not received a real terminator yet.
+    Open,
+    /// A semantically unreachable block.
     Unreachable,
     Return {
         value: Option<Value>,
@@ -176,7 +179,7 @@ impl ControlFlowGraph {
         };
 
         match &block.terminator {
-            Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
+            Terminator::Open | Terminator::Open | Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
             Terminator::Jump { target, .. } => vec![*target],
             Terminator::Branch {
                 then_target,
@@ -406,7 +409,7 @@ impl CfgBuilder {
         self.blocks.push(BasicBlock {
             id,
             instructions: Vec::new(),
-            terminator: Terminator::Unreachable,
+            terminator: Terminator::Open,
             definitions: Vec::new(),
             phi_nodes: Vec::new(),
         });
@@ -747,7 +750,7 @@ fn collect_value_uses_from_environment(
 
 fn terminator_targets(terminator: &Terminator) -> Vec<BlockId> {
     match terminator {
-        Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
+        Terminator::Open | Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
         Terminator::Jump { target, .. } => vec![*target],
         Terminator::Branch {
             then_target,
@@ -980,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn unterminated_cfg_blocks_are_explicitly_unreachable() {
+    fn unterminated_cfg_blocks_remain_explicitly_open() {
         let lexed = lyra_lexer::tokenize("fn main() -> Int { let value = 42; }");
         assert!(lexed.diagnostics.is_empty());
         let (ast, parser_diagnostics) = lyra_parser::parse(&lexed.tokens);
@@ -989,7 +992,7 @@ mod tests {
         let cfg = build_cfg(&module.functions[0].body);
         let entry = cfg.block(BlockId(0)).expect("entry block");
 
-        assert!(matches!(entry.terminator, Terminator::Unreachable));
+        assert!(matches!(entry.terminator, Terminator::Open));
         assert!(cfg.successors(entry.id).is_empty());
     }
 
