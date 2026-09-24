@@ -222,7 +222,16 @@ impl Analyzer {
         let mut unreachable = false;
         for statement in statements {
             if unreachable {
-                self.error("unreachable statement", statement.span());
+                let span = match statement {
+                    Statement::Let { span, .. }
+                    | Statement::Var { span, .. }
+                    | Statement::Assign { span, .. }
+                    | Statement::Return { span, .. }
+                    | Statement::If { span, .. }
+                    | Statement::While { span, .. }
+                    | Statement::Expression { span, .. } => *span,
+                };
+                self.error("unreachable statement", span);
             }
             self.check_statement(statement);
             if Self::block_never_falls_through(std::slice::from_ref(statement)) {
