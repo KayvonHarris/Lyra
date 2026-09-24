@@ -772,9 +772,10 @@ mod tests {
 
         let llvm = emit_llvm_ir(&module).expect("while loop should lower");
         assert!(llvm.contains("bb1:"));
-        assert!(llvm.contains("bb2:"));
+        assert!(!llvm.contains("bb2:"));
         assert!(llvm.contains("bb3:"));
-        assert!(llvm.contains("br i1"));
+        assert!(!llvm.contains("br i1"));
+        assert!(llvm.contains("br label %bb3"));
         assert!(llvm.contains("ret i32 42"));
     }
 
