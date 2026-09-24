@@ -656,15 +656,31 @@ impl CfgBuilder {
                             span: *span,
                         },
                     );
-                    self.set_terminator(
-                        condition_id,
-                        Terminator::Branch {
-                            condition: condition.clone(),
-                            then_target: body_id,
-                            else_target: exit_id,
-                            span: *span,
-                        },
-                    );
+                    match condition {
+                        Value::Boolean(true, _) => self.set_terminator(
+                            condition_id,
+                            Terminator::Jump {
+                                target: body_id,
+                                span: *span,
+                            },
+                        ),
+                        Value::Boolean(false, _) => self.set_terminator(
+                            condition_id,
+                            Terminator::Jump {
+                                target: exit_id,
+                                span: *span,
+                            },
+                        ),
+                        _ => self.set_terminator(
+                            condition_id,
+                            Terminator::Branch {
+                                condition: condition.clone(),
+                                then_target: body_id,
+                                else_target: exit_id,
+                                span: *span,
+                            },
+                        ),
+                    }
                     let body_end = self.lower_block(body, body_id);
                     if !self.is_terminated(body_end) {
                         self.set_terminator(
