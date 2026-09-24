@@ -712,7 +712,8 @@ mod tests {
 
     #[test]
     fn accepts_boolean_while_condition() {
-        let analysis = analyze_source("fn main() -> Int { while true { return 42; } return 0; }");
+        let analysis =
+            analyze_source("fn main() -> Int { while false { return 42; } return 0; }");
         assert!(analysis.diagnostics.is_empty());
     }
 
