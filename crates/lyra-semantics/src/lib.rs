@@ -151,9 +151,7 @@ impl Analyzer {
                             scope.insert(parameter.name.clone(), Binding { ty, mutable: false });
                         }
                     }
-                    for statement in &function.body.statements {
-                        self.check_statement(statement);
-                    }
+                    self.check_block(&function.body.statements);
                     if self.current_return_type != Type::Unit
                         && !Self::block_never_falls_through(&function.body.statements)
                     {
@@ -172,6 +170,51 @@ impl Analyzer {
 
         Analysis {
             diagnostics: self.diagnostics,
+        }
+    }
+
+    fn check_block(&mut self, statements: &[Statement]) {
+        let mut reachable = true;
+
+        for statement in statements {
+            if !reachable {
+                self.error("unreachable statement", Self::statement_span(statement));
+                continue;
+            }
+
+            self.check_statement(statement);
+            reachable = !Self::statement_never_falls_through(statement);
+        }
+    }
+
+    fn statement_span(statement: &Statement) -> Span {
+        match statement {
+            Statement::Let { span, .. }
+            | Statement::Var { span, .. }
+            | Statement::Assign { span, .. }
+            | Statement::Return { span, .. }
+            | Statement::If { span, .. }
+            | Statement::While { span, .. }
+            | Statement::Expression { span, .. } => *span,
+        }
+    }
+
+    fn statement_never_falls_through(statement: &Statement) -> bool {
+        match statement {
+            Statement::Return { .. } => true,
+            Statement::If {
+                then_block,
+                else_block: Some(else_block),
+                ..
+            } => {
+                Self::block_never_falls_through(&then_block.statements)
+                    && Self::block_never_falls_through(&else_block.statements)
+            }
+            Statement::While {
+                condition: Expression::Boolean(true, _),
+                ..
+            } => true,
+            _ => false,
         }
     }
 
@@ -309,16 +352,12 @@ impl Analyzer {
                 }
 
                 self.push_scope();
-                for statement in &then_block.statements {
-                    self.check_statement(statement);
-                }
+                self.check_block(&then_block.statements);
                 self.pop_scope();
 
                 if let Some(else_block) = else_block {
                     self.push_scope();
-                    for statement in &else_block.statements {
-                        self.check_statement(statement);
-                    }
+                    self.check_block(&else_block.statements);
                     self.pop_scope();
                 }
             }
@@ -331,9 +370,7 @@ impl Analyzer {
                 }
 
                 self.push_scope();
-                for statement in &body.statements {
-                    self.check_statement(statement);
-                }
+                self.check_block(&body.statements);
                 self.pop_scope();
             }
             Statement::Expression { expression, .. } => {
@@ -675,7 +712,7 @@ mod tests {
 
     #[test]
     fn accepts_boolean_while_condition() {
-        let analysis = analyze_source("fn main() -> Int { while true { return 42; } return 0; }");
+        let analysis = analyze_source("fn main() -> Int { while false { return 42; } return 0; }");
         assert!(analysis.diagnostics.is_empty());
     }
 
@@ -749,6 +786,41 @@ mod tests {
                 .message
                 .contains("function `spin` may exit without returning Integer")
         }));
+    }
+
+    #[test]
+    fn rejects_statement_after_return_as_unreachable() {
+        let analysis = analyze_source("fn main() -> Int { return 0; let value = 1; }");
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == "unreachable statement")
+        );
+    }
+
+    #[test]
+    fn rejects_statement_after_non_fallthrough_if_else_as_unreachable() {
+        let analysis = analyze_source(
+            "fn main() -> Int { if true { return 1; } else { return 0; } let value = 2; }",
+        );
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == "unreachable statement")
+        );
+    }
+
+    #[test]
+    fn rejects_statement_after_while_true_as_unreachable() {
+        let analysis = analyze_source("fn main() -> Int { while true { } let value = 1; }");
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == "unreachable statement")
+        );
     }
 
     #[test]

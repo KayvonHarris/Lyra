@@ -6,6 +6,4 @@ fn main() -> Int {
     while true {
         return 42;
     }
-
-    return 0;
 }
