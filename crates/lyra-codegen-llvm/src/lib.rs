@@ -258,6 +258,13 @@ impl<'a> FunctionEmitter<'a> {
         body: &mut String,
     ) -> Result<(), CodegenError> {
         match terminator {
+            Terminator::Open if return_type == Type::Unit => {
+                body.push_str("  ret void\n");
+                Ok(())
+            }
+            Terminator::Open => Err(CodegenError::Unsupported(
+                "open CFG block reached LLVM code generation".into(),
+            )),
             Terminator::Unreachable if return_type == Type::Unit => {
                 body.push_str("  ret void\n");
                 Ok(())
