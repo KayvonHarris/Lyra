@@ -218,6 +218,19 @@ impl Analyzer {
         }
     }
 
+    fn check_block_statements(&mut self, statements: &[Statement]) {
+        let mut unreachable = false;
+        for statement in statements {
+            if unreachable {
+                self.error("unreachable statement", statement.span());
+            }
+            self.check_statement(statement);
+            if Self::block_never_falls_through(std::slice::from_ref(statement)) {
+                unreachable = true;
+            }
+        }
+    }
+
     fn block_never_falls_through(statements: &[Statement]) -> bool {
         for statement in statements {
             match statement {
