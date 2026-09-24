@@ -778,12 +778,13 @@ mod tests {
 
     #[test]
     fn rejects_statement_after_return_as_unreachable() {
-        let analysis =
-            analyze_source("fn main() -> Int { return 0; let value = 1; }");
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message == "unreachable statement"));
+        let analysis = analyze_source("fn main() -> Int { return 0; let value = 1; }");
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == "unreachable statement")
+        );
     }
 
     #[test]
@@ -791,20 +792,23 @@ mod tests {
         let analysis = analyze_source(
             "fn main() -> Int { if true { return 1; } else { return 0; } let value = 2; }",
         );
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message == "unreachable statement"));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == "unreachable statement")
+        );
     }
 
     #[test]
     fn rejects_statement_after_while_true_as_unreachable() {
-        let analysis =
-            analyze_source("fn main() -> Int { while true { } let value = 1; }");
-        assert!(analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message == "unreachable statement"));
+        let analysis = analyze_source("fn main() -> Int { while true { } let value = 1; }");
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == "unreachable statement")
+        );
     }
 
     #[test]
