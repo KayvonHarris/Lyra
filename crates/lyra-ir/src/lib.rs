@@ -179,7 +179,7 @@ impl ControlFlowGraph {
         };
 
         match &block.terminator {
-            Terminator::Open | Terminator::Open | Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
+            Terminator::Open | Terminator::Unreachable | Terminator::Return { .. } => Vec::new(),
             Terminator::Jump { target, .. } => vec![*target],
             Terminator::Branch {
                 then_target,
