@@ -1235,6 +1235,22 @@ mod tests {
     }
 
     #[test]
+    fn inner_shadow_does_not_replace_outer_definition_after_branch() {
+        let module = lower_source(
+            "fn main() -> Int { let value = 1; if true { let value = 2; let inner = value; } return value; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let merge = cfg
+            .blocks
+            .iter()
+            .find(|block| cfg.predecessors(block.id).len() == 2)
+            .expect("branch merge");
+
+        assert_eq!(cfg.definition_at_entry(merge.id, "value"), Some(ValueId(0)));
+        assert!(merge.phi_nodes.iter().all(|phi| phi.name != "value"));
+    }
+
+    #[test]
     fn sibling_branch_uses_pre_branch_definition() {
         let module = lower_source(
             "fn main() -> Int { var x = 1; var y = 0; if true { x = 2; } else { y = x; } return y; }",
