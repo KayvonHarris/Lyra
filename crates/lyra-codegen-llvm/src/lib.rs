@@ -42,7 +42,12 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         }
 
         let cfg = build_cfg(&function.body);
+        let reachable_blocks = reachable_block_ids(&cfg);
         for block in &cfg.blocks {
+            if !reachable_blocks.contains(&block.id) {
+                continue;
+            }
+
             for successor in cfg.successors(block.id) {
                 if cfg.block(successor).is_none() {
                     return Err(CodegenError::Unsupported(
@@ -78,6 +83,20 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
     }
 
     Ok(output)
+}
+
+fn reachable_block_ids(cfg: &lyra_ir::ControlFlowGraph) -> std::collections::HashSet<BlockId> {
+    let mut reachable = std::collections::HashSet::new();
+    let mut pending = vec![BlockId(0)];
+
+    while let Some(block) = pending.pop() {
+        if !reachable.insert(block) {
+            continue;
+        }
+        pending.extend(cfg.successors(block));
+    }
+
+    reachable
 }
 
 fn normalize_main_returns(body: &str) -> String {
@@ -258,6 +277,13 @@ impl<'a> FunctionEmitter<'a> {
         body: &mut String,
     ) -> Result<(), CodegenError> {
         match terminator {
+            Terminator::Open if return_type == Type::Unit => {
+                body.push_str("  ret void\n");
+                Ok(())
+            }
+            Terminator::Open => Err(CodegenError::Unsupported(
+                "open CFG block reached LLVM code generation",
+            )),
             Terminator::Unreachable if return_type == Type::Unit => {
                 body.push_str("  ret void\n");
                 Ok(())
@@ -746,9 +772,10 @@ mod tests {
 
         let llvm = emit_llvm_ir(&module).expect("while loop should lower");
         assert!(llvm.contains("bb1:"));
-        assert!(llvm.contains("bb2:"));
+        assert!(!llvm.contains("bb2:"));
         assert!(llvm.contains("bb3:"));
-        assert!(llvm.contains("br i1"));
+        assert!(!llvm.contains("br i1"));
+        assert!(llvm.contains("br label %bb3"));
         assert!(llvm.contains("ret i32 42"));
     }
 
