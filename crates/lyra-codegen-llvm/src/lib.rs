@@ -50,11 +50,11 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 continue;
             }
 
-            if block.id != BlockId(0) {
+            if block.id != cfg.entry {
                 body.push_str(&format!("\nbb{}:\n", block.id.0));
             }
             emitter.enter_cfg_block(&cfg, block);
-            emitter.emit_phi_nodes(block, &mut body)?;
+            emitter.emit_phi_nodes(block, cfg.entry, &mut body)?;
             emitter.emit_cfg_instructions(block, &mut body)?;
             emitter.emit_cfg_terminator(&block.terminator, function.return_type, &mut body)?;
         }
@@ -159,6 +159,7 @@ impl<'a> FunctionEmitter<'a> {
     fn emit_phi_nodes(
         &mut self,
         block: &BasicBlock,
+        entry: BlockId,
         body: &mut String,
     ) -> Result<(), CodegenError> {
         for phi in &block.phi_nodes {
@@ -169,7 +170,7 @@ impl<'a> FunctionEmitter<'a> {
                     format!(
                         "[ {}, %{} ]",
                         Self::ssa_register(*value),
-                        Self::block_label(*predecessor)
+                        Self::block_label(*predecessor, entry)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -186,8 +187,8 @@ impl<'a> FunctionEmitter<'a> {
         format!("%ssa{}", id.0)
     }
 
-    fn block_label(id: BlockId) -> String {
-        if id == BlockId(0) {
+    fn block_label(id: BlockId, entry: BlockId) -> String {
+        if id == entry {
             "entry".to_owned()
         } else {
             format!("bb{}", id.0)
