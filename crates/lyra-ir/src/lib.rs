@@ -141,7 +141,58 @@ pub struct ControlFlowGraph {
     pub exit_definitions: BlockDefinitionMap,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CfgValidationError {
+    MissingEntryBlock,
+    ReachableOpenBlock { block: BlockId },
+    MissingSuccessor { block: BlockId, successor: BlockId },
+}
+
 impl ControlFlowGraph {
+    #[must_use]
+    pub fn reachable_blocks(&self) -> std::collections::HashSet<BlockId> {
+        let mut reachable = std::collections::HashSet::new();
+        if self.block(BlockId(0)).is_none() {
+            return reachable;
+        }
+
+        let mut pending = vec![BlockId(0)];
+        while let Some(block) = pending.pop() {
+            if !reachable.insert(block) {
+                continue;
+            }
+            pending.extend(self.successors(block));
+        }
+        reachable
+    }
+
+    pub fn validate_reachable(&self, allow_open_exit: bool) -> Result<(), CfgValidationError> {
+        if self.block(BlockId(0)).is_none() {
+            return Err(CfgValidationError::MissingEntryBlock);
+        }
+
+        let reachable = self.reachable_blocks();
+        for block in &self.blocks {
+            if !reachable.contains(&block.id) {
+                continue;
+            }
+
+            if matches!(block.terminator, Terminator::Open) && !allow_open_exit {
+                return Err(CfgValidationError::ReachableOpenBlock { block: block.id });
+            }
+
+            for successor in self.successors(block.id) {
+                if self.block(successor).is_none() {
+                    return Err(CfgValidationError::MissingSuccessor {
+                        block: block.id,
+                        successor,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn block(&self, id: BlockId) -> Option<&BasicBlock> {
         self.blocks.iter().find(|block| block.id == id)
