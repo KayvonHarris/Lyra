@@ -305,10 +305,6 @@ impl<'a> FunctionEmitter<'a> {
             Terminator::Open => Err(CodegenError::Unsupported(
                 "open CFG block reached LLVM code generation",
             )),
-            Terminator::Unreachable if return_type == Type::Unit => {
-                body.push_str("  ret void\n");
-                Ok(())
-            }
             Terminator::Unreachable => {
                 body.push_str("  unreachable\n");
                 Ok(())
@@ -512,6 +508,19 @@ mod tests {
         let llvm = emit_llvm_ir(&module).expect("Unit call should lower");
         assert!(llvm.contains("call void @log()"));
         assert!(!llvm.contains("= call void @log()"));
+    }
+
+    #[test]
+    fn semantic_unreachable_emits_llvm_unreachable_for_unit() {
+        let span = Span { start: 0, end: 0 };
+        let mut emitter = FunctionEmitter::new(&HashMap::new());
+        let mut body = String::new();
+
+        emitter
+            .emit_cfg_terminator(&Terminator::Unreachable, Type::Unit, &mut body)
+            .expect("semantic unreachable should lower");
+
+        assert_eq!(body, "  unreachable\n");
     }
 
     #[test]
