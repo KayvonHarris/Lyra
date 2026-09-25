@@ -42,8 +42,9 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         }
 
         let cfg = build_cfg(&function.body);
-        let reachable_blocks = reachable_block_ids(&cfg);
-        validate_reachable_cfg(&cfg, &reachable_blocks, function.return_type)?;
+        let reachable_blocks = cfg.reachable_blocks();
+        cfg.validate_reachable(function.return_type == Type::Unit)
+            .map_err(|_| CodegenError::Unsupported("invalid reachable CFG"))?;
         for block in &cfg.blocks {
             if !reachable_blocks.contains(&block.id) {
                 continue;
@@ -76,48 +77,6 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
     }
 
     Ok(output)
-}
-
-fn reachable_block_ids(cfg: &lyra_ir::ControlFlowGraph) -> std::collections::HashSet<BlockId> {
-    let mut reachable = std::collections::HashSet::new();
-    let mut pending = vec![BlockId(0)];
-
-    while let Some(block) = pending.pop() {
-        if !reachable.insert(block) {
-            continue;
-        }
-        pending.extend(cfg.successors(block));
-    }
-
-    reachable
-}
-
-fn validate_reachable_cfg(
-    cfg: &lyra_ir::ControlFlowGraph,
-    reachable: &std::collections::HashSet<BlockId>,
-    return_type: Type,
-) -> Result<(), CodegenError> {
-    for block in &cfg.blocks {
-        if !reachable.contains(&block.id) {
-            continue;
-        }
-
-        if matches!(block.terminator, Terminator::Open) && return_type != Type::Unit {
-            return Err(CodegenError::Unsupported(
-                "reachable non-Unit CFG block is still open",
-            ));
-        }
-
-        for successor in cfg.successors(block.id) {
-            if cfg.block(successor).is_none() {
-                return Err(CodegenError::Unsupported(
-                    "CFG successor references missing block",
-                ));
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn normalize_main_returns(body: &str) -> String {
