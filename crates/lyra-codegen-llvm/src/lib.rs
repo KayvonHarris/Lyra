@@ -49,14 +49,6 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
                 continue;
             }
 
-            for successor in cfg.successors(block.id) {
-                if cfg.block(successor).is_none() {
-                    return Err(CodegenError::Unsupported(
-                        "CFG successor references missing block",
-                    ));
-                }
-            }
-
             if block.id != BlockId(0) {
                 body.push_str(&format!("\nbb{}:\n", block.id.0));
             }
