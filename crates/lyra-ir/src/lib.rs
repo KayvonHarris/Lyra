@@ -134,7 +134,7 @@ pub struct BasicBlock {
 pub type DefinitionMap = HashMap<String, ValueId>;
 pub type BlockDefinitionMap = HashMap<BlockId, DefinitionMap>;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ControlFlowGraph {
     pub entry: BlockId,
     pub blocks: Vec<BasicBlock>,
