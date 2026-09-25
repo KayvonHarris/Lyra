@@ -1,7 +1,7 @@
 //! Compiler pipeline orchestration.
 
 use lyra_ast::Module;
-use lyra_diagnostics::Diagnostic;
+use lyra_diagnostics::{Diagnostic, Severity};
 
 #[derive(Debug)]
 pub struct CompileOutput {
@@ -16,6 +16,12 @@ pub enum BackendError {
     Codegen(lyra_codegen_llvm::CodegenError),
 }
 
+fn has_errors(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+}
+
 #[must_use]
 pub fn compile(source: &str) -> CompileOutput {
     let lexed = lyra_lexer::tokenize(source);
@@ -24,11 +30,11 @@ pub fn compile(source: &str) -> CompileOutput {
     let mut diagnostics = lexed.diagnostics;
     diagnostics.extend(parser_diagnostics);
 
-    if diagnostics.is_empty() {
+    if !has_errors(&diagnostics) {
         diagnostics.extend(lyra_semantics::analyze(&module).diagnostics);
     }
 
-    let ir = if diagnostics.is_empty() {
+    let ir = if !has_errors(&diagnostics) {
         Some(lyra_ir::lower(&module))
     } else {
         None
@@ -43,7 +49,7 @@ pub fn compile(source: &str) -> CompileOutput {
 
 pub fn compile_to_llvm(source: &str) -> Result<String, BackendError> {
     let output = compile(source);
-    if !output.diagnostics.is_empty() {
+    if has_errors(&output.diagnostics) {
         return Err(BackendError::Frontend(output.diagnostics));
     }
 
@@ -56,6 +62,26 @@ pub fn compile_to_llvm(source: &str) -> Result<String, BackendError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warning_does_not_count_as_frontend_error() {
+        let diagnostics = vec![Diagnostic {
+            severity: Severity::Warning,
+            message: "warning".to_owned(),
+            span: None,
+        }];
+        assert!(!has_errors(&diagnostics));
+    }
+
+    #[test]
+    fn error_counts_as_frontend_error() {
+        let diagnostics = vec![Diagnostic {
+            severity: Severity::Error,
+            message: "error".to_owned(),
+            span: None,
+        }];
+        assert!(has_errors(&diagnostics));
+    }
 
     #[test]
     fn reports_semantic_errors_through_driver() {
