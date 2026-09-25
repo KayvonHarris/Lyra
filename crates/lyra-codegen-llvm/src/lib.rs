@@ -512,8 +512,8 @@ mod tests {
 
     #[test]
     fn semantic_unreachable_emits_llvm_unreachable_for_unit() {
-        let span = Span { start: 0, end: 0 };
-        let mut emitter = FunctionEmitter::new(&HashMap::new());
+        let signatures = HashMap::new();
+        let mut emitter = FunctionEmitter::new(&signatures);
         let mut body = String::new();
 
         emitter
