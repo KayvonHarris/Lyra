@@ -136,6 +136,7 @@ pub type BlockDefinitionMap = HashMap<BlockId, DefinitionMap>;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ControlFlowGraph {
+    pub entry: BlockId,
     pub blocks: Vec<BasicBlock>,
     pub entry_definitions: BlockDefinitionMap,
     pub exit_definitions: BlockDefinitionMap,
@@ -152,11 +153,11 @@ impl ControlFlowGraph {
     #[must_use]
     pub fn reachable_blocks(&self) -> std::collections::HashSet<BlockId> {
         let mut reachable = std::collections::HashSet::new();
-        if self.block(BlockId(0)).is_none() {
+        if self.block(self.entry).is_none() {
             return reachable;
         }
 
-        let mut pending = vec![BlockId(0)];
+        let mut pending = vec![self.entry];
         while let Some(block) = pending.pop() {
             if !reachable.insert(block) {
                 continue;
@@ -167,7 +168,7 @@ impl ControlFlowGraph {
     }
 
     pub fn validate_reachable(&self, allow_open_exit: bool) -> Result<(), CfgValidationError> {
-        if self.block(BlockId(0)).is_none() {
+        if self.block(self.entry).is_none() {
             return Err(CfgValidationError::MissingEntryBlock);
         }
 
@@ -441,6 +442,7 @@ pub fn build_cfg(block: &Block) -> ControlFlowGraph {
     builder.lower_block(block, entry);
     let (entry_definitions, exit_definitions) = builder.construct_ssa();
     ControlFlowGraph {
+        entry,
         blocks: builder.blocks,
         entry_definitions,
         exit_definitions,
@@ -1067,6 +1069,7 @@ mod tests {
     fn models_basic_block_successors() {
         let span = Span { start: 0, end: 0 };
         let cfg = ControlFlowGraph {
+            entry: BlockId(0),
             blocks: vec![
                 BasicBlock {
                     id: BlockId(0),
