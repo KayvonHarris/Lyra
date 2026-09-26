@@ -736,9 +736,9 @@ impl CfgBuilder {
                     if let Some(instruction) = self.blocks[block_index]
                         .instructions
                         .get(definition.instruction_index)
-                        && let Some(name) = defined_name(instruction)
+                        && let Some(binding) = defined_binding(instruction)
                     {
-                        outgoing.insert(name, definition.id);
+                        outgoing.insert(binding, definition.id);
                     }
                 }
 
