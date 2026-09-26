@@ -420,6 +420,9 @@ impl<'a> FunctionEmitter<'a> {
                 body.push_str(&format!("  {result} = zext i1 {comparison} to i64\n"));
                 Ok(result)
             }
+            Value::Convert { .. } => {
+                Err(CodegenError::Unsupported("numeric conversions"))
+            }
             Value::Float(_, _) => Err(CodegenError::Unsupported("float values")),
             Value::String(_, _) => Err(CodegenError::Unsupported("string values")),
         }
