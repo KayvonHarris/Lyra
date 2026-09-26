@@ -400,7 +400,14 @@ impl<'a> FunctionEmitter<'a> {
                     BinaryOperator::Greater => "sgt",
                     BinaryOperator::GreaterEqual => "sge",
                     BinaryOperator::And | BinaryOperator::Or => {
-                        return Err(CodegenError::Unsupported("logical binary operator"));
+                        let opcode = if *operator == BinaryOperator::And {
+                            "and"
+                        } else {
+                            "or"
+                        };
+                        let register = self.register();
+                        body.push_str(&format!("  {register} = {opcode} i64 {left}, {right}\n"));
+                        return Ok(register);
                     }
                     _ => unreachable!("arithmetic operators returned above"),
                 };
@@ -431,6 +438,40 @@ mod tests {
             binding: BindingId(binding),
             span,
         }
+    }
+
+    #[test]
+    fn emits_logical_binary_operators() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "logic".into(),
+                parameters: vec![],
+                return_type: Type::Boolean,
+                body: Block {
+                    instructions: vec![Instruction::Return {
+                        value: Some(Value::Binary {
+                            left: Box::new(Value::Boolean(true, span)),
+                            operator: BinaryOperator::And,
+                            right: Box::new(Value::Binary {
+                                left: Box::new(Value::Boolean(false, span)),
+                                operator: BinaryOperator::Or,
+                                right: Box::new(Value::Boolean(true, span)),
+                                span,
+                            }),
+                            span,
+                        }),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("logical operators should lower");
+        assert!(llvm.contains(" = or i64 0, 1"));
+        assert!(llvm.contains(" = and i64 1, %"));
+        assert!(llvm.contains("ret i64 %"));
     }
 
     #[test]
