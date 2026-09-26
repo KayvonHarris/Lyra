@@ -1,93 +1,51 @@
 # Lyra Semantic Rules v0.1
 
-This document defines the semantic rules implemented by the Lyra v0.1 semantic analyzer. It describes the current compiler behavior, not the final Lyra type system.
+This document defines the semantic rules currently implemented by the Lyra v0.1 semantic analyzer. It describes current compiler behavior, not the final Lyra type system.
 
 ## Pipeline
 
-The v0.1 front end processes source code as:
-
 ```text
-source -> lexer -> parser -> AST -> semantic analysis -> diagnostics
+source -> lexer -> parser -> AST -> semantic analysis -> Lyra IR
 ```
 
-Semantic analysis runs after parsing and before future lowering into Lyra IR.
+Semantic analysis must succeed before IR lowering proceeds.
 
 ## Primitive types
 
-The semantic analyzer currently models:
+The analyzer models `Integer` (source `Int`), `Float`, `String`, `Boolean` (source `Bool`), `Unit`, and internal recovery type `Unknown`. Unknown type annotations produce diagnostics.
 
-- `Integer`
-- `Float`
-- `String`
-- `Boolean`
-- `Unit`
-- `Unknown`
+## Functions and signatures
 
-`Unknown` is an internal recovery type. It allows analysis to continue after an earlier semantic error without generating unnecessary follow-on diagnostics.
+Function declarations are collected before bodies are analyzed, allowing calls regardless of source order. Parameters and declared return types participate in checking. Untyped parameters and functions currently default to `Integer` as a v0.1 compatibility rule.
 
-## Variable bindings
+Duplicate function names and duplicate parameter names are rejected. Parameters cannot have type `Unit`. `main` cannot currently declare parameters and must return `Int`; calls to `main` are rejected.
 
-A `let` statement introduces a variable into the current function scope. Its type is inferred from the initializer expression.
+Function calls validate the callee, argument count, and argument types against the collected signature.
 
-```lyra
-let speed = 65;      // Integer
-let ratio = 1.5;     // Float
-let active = true;   // Boolean
-```
+## Bindings, mutability, and scopes
 
-A variable cannot be declared twice in the same scope. References to names that are not defined in an active scope produce an `unknown identifier` diagnostic.
+`let` introduces an immutable binding and `var` a mutable binding. Their types are inferred from initializers; `Unit` cannot be bound as a value.
 
-Each function receives an independent scope. Variables declared in one function are not visible in another function.
+Function bodies have independent scopes. `if` branches and `while` bodies introduce nested scopes. Duplicate declarations in one scope are rejected while inner scopes may shadow outer bindings.
 
-## Numeric operations
+Assignment requires an existing mutable binding and a value compatible with its inferred type. Assignment to an immutable binding is rejected.
 
-`+`, `-`, `*`, `/`, and `%` currently require numeric operands.
+## Expressions
 
-Integer operations produce `Integer`. If either operand is a `Float`, the result is `Float`.
+Arithmetic operators require numeric operands. Integer-only arithmetic produces `Integer`; mixed integer/float arithmetic produces `Float`. Unary `-` requires a numeric operand and unary `!` requires `Boolean`.
 
-This numeric promotion rule is an initial v0.1 rule and may become more explicit as Lyra gains concrete integer widths, conversions, and overflow semantics.
+Ordering comparisons require numeric operands and produce `Boolean`. Equality accepts matching primitive types and the v0.1 integer/float numeric pairing. `&&` and `||` require boolean operands.
 
-## Unary operations
+## Return and control flow
 
-Unary `-` requires an `Integer` or `Float` operand and preserves its numeric type.
+Returns are checked against the function's declared or default return type. Returning no value produces `Unit`. Non-`Unit` functions are diagnosed when control may reach the end without returning.
 
-Unary `!` requires a `Boolean` operand and produces `Boolean`.
-
-## Comparisons
-
-`<`, `<=`, `>`, and `>=` require numeric operands and produce `Boolean`.
-
-## Equality
-
-`==` and `!=` accept operands of the same primitive type. Integer and float operands are also considered compatible in v0.1. Equality produces `Boolean`.
-
-## Logical operations
-
-`&&` and `||` require boolean operands and produce `Boolean`.
-
-## Return statements
-
-The analyzer validates expressions inside `return` statements. Function return-type declarations and consistency checking are not yet part of the v0.1 grammar, so return types are not currently enforced.
+An `if` is non-fallthrough when both branches are non-fallthrough; literal `while true` is also treated as non-fallthrough. Statements after proven non-fallthrough control flow are diagnosed as unreachable. `if` and `while` conditions must be `Bool`.
 
 ## Error recovery
 
-Semantic errors are reported through `lyra-diagnostics`. The analyzer attempts to continue after an error. Expressions depending on an unresolved or invalid expression use the internal `Unknown` type to reduce cascading diagnostics.
+Semantic errors are reported through `lyra-diagnostics`. Analysis attempts to continue after an error, using `Unknown` to reduce cascading diagnostics.
 
-## Not yet implemented
+## Remaining v0.1 boundaries
 
-The following are intentionally outside this semantic milestone:
-
-- explicit type annotations
-- function parameters
-- function calls
-- declared function return types
-- nested block scopes in the grammar
-- assignment and mutability rules
-- structs, enums, traits, or generics
-- arrays, tuples, references, or pointers
-- ownership and borrowing
-- integer width and signedness rules
-- compile-time constants
-- Lyra IR lowering
-
-These features should be introduced through later grammar, semantic, and IR milestones rather than being assumed by v0.1.
+The current semantic model does not define structs, enums, traits, generics, arrays, tuples, references, pointers, ownership/borrowing, integer width and signedness rules, compile-time constants, or user-defined aggregate types.
