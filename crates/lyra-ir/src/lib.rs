@@ -215,20 +215,30 @@ impl ControlFlowGraph {
 
     #[must_use]
     pub fn definition_at_entry(&self, block: BlockId, name: &str) -> Option<ValueId> {
-        self.entry_definitions
-            .get(&block)
-            .and_then(|definitions| definitions.iter().filter_map(|(binding, value)| {
-                (binding_name(&self.blocks, *binding) == Some(name)).then_some((*binding, *value))
-            }).min_by_key(|(binding, _)| *binding).map(|(_, value)| value))
+        self.entry_definitions.get(&block).and_then(|definitions| {
+            definitions
+                .iter()
+                .filter_map(|(binding, value)| {
+                    (binding_name(&self.blocks, *binding) == Some(name))
+                        .then_some((*binding, *value))
+                })
+                .min_by_key(|(binding, _)| *binding)
+                .map(|(_, value)| value)
+        })
     }
 
     #[must_use]
     pub fn definition_at_exit(&self, block: BlockId, name: &str) -> Option<ValueId> {
-        self.exit_definitions
-            .get(&block)
-            .and_then(|definitions| definitions.iter().filter_map(|(binding, value)| {
-                (binding_name(&self.blocks, *binding) == Some(name)).then_some((*binding, *value))
-            }).min_by_key(|(binding, _)| *binding).map(|(_, value)| value))
+        self.exit_definitions.get(&block).and_then(|definitions| {
+            definitions
+                .iter()
+                .filter_map(|(binding, value)| {
+                    (binding_name(&self.blocks, *binding) == Some(name))
+                        .then_some((*binding, *value))
+                })
+                .min_by_key(|(binding, _)| *binding)
+                .map(|(_, value)| value)
+        })
     }
 
     #[must_use]
@@ -460,12 +470,22 @@ impl Lowerer {
             lyra_ast::Statement::Let { name, value, span } => {
                 let value = self.lower_expression(value);
                 let binding = self.declare(name);
-                Instruction::Bind { name: name.clone(), binding, value, span: *span }
+                Instruction::Bind {
+                    name: name.clone(),
+                    binding,
+                    value,
+                    span: *span,
+                }
             }
             lyra_ast::Statement::Var { name, value, span } => {
                 let value = self.lower_expression(value);
                 let binding = self.declare(name);
-                Instruction::BindMutable { name: name.clone(), binding, value, span: *span }
+                Instruction::BindMutable {
+                    name: name.clone(),
+                    binding,
+                    value,
+                    span: *span,
+                }
             }
             lyra_ast::Statement::Assign { name, value, span } => Instruction::Assign {
                 name: name.clone(),
@@ -485,8 +505,15 @@ impl Lowerer {
             } => {
                 let condition = self.lower_expression(condition);
                 let then_block = self.lower_block(then_block, true);
-                let else_block = else_block.as_ref().map(|block| self.lower_block(block, true));
-                Instruction::If { condition, then_block, else_block, span: *span }
+                let else_block = else_block
+                    .as_ref()
+                    .map(|block| self.lower_block(block, true));
+                Instruction::If {
+                    condition,
+                    then_block,
+                    else_block,
+                    span: *span,
+                }
             }
             lyra_ast::Statement::While {
                 condition,
@@ -495,7 +522,11 @@ impl Lowerer {
             } => {
                 let condition = self.lower_expression(condition);
                 let body = self.lower_block(body, true);
-                Instruction::While { condition, body, span: *span }
+                Instruction::While {
+                    condition,
+                    body,
+                    span: *span,
+                }
             }
             lyra_ast::Statement::Expression { expression, span } => Instruction::Evaluate {
                 value: self.lower_expression(expression),
