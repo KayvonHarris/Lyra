@@ -406,9 +406,7 @@ impl<'a> FunctionEmitter<'a> {
                             "or"
                         };
                         let register = self.register();
-                        body.push_str(&format!(
-                            "  {register} = {opcode} i64 {left}, {right}\n"
-                        ));
+                        body.push_str(&format!("  {register} = {opcode} i64 {left}, {right}\n"));
                         return Ok(register);
                     }
                     _ => unreachable!("arithmetic operators returned above"),
