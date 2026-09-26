@@ -400,7 +400,10 @@ pub fn lower(module: &lyra_ast::Module) -> Module {
     }
 }
 
-fn lower_function(function: &lyra_ast::Function, function_returns: &HashMap<String, Type>) -> Function {
+fn lower_function(
+    function: &lyra_ast::Function,
+    function_returns: &HashMap<String, Type>,
+) -> Function {
     let mut lowerer = Lowerer {
         function_returns,
         ..Lowerer::default()
@@ -583,7 +586,9 @@ impl Lowerer {
                 .function_returns
                 .get(callee)
                 .expect("semantic analysis guarantees resolved function calls"),
-            lyra_ast::Expression::Unary { operator, operand, .. } => match operator {
+            lyra_ast::Expression::Unary {
+                operator, operand, ..
+            } => match operator {
                 lyra_ast::UnaryOperator::Negate => self.expression_type(operand),
                 lyra_ast::UnaryOperator::Not => Type::Boolean,
             },
@@ -1000,8 +1005,8 @@ impl CfgBuilder {
                     if defined_binding(other).is_some() {
                         let id = ValueId(self.next_value);
                         self.next_value += 1;
-                        let ty = defined_type(other)
-                            .expect("SSA definition must have a binding type");
+                        let ty =
+                            defined_type(other).expect("SSA definition must have a binding type");
                         self.blocks[current.0].definitions.push(ValueDefinition {
                             id,
                             ty,
@@ -1460,13 +1465,14 @@ mod tests {
         );
         let cfg = build_cfg(&module.functions[0].body);
 
-        assert!(cfg
-            .blocks
-            .iter()
-            .flat_map(|block| &block.definitions)
-            .filter(|definition| definition.ty == Type::Float)
-            .count()
-            >= 3);
+        assert!(
+            cfg.blocks
+                .iter()
+                .flat_map(|block| &block.definitions)
+                .filter(|definition| definition.ty == Type::Float)
+                .count()
+                >= 3
+        );
 
         let phi = cfg
             .blocks
