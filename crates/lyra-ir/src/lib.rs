@@ -404,10 +404,7 @@ fn lower_function(
     function: &lyra_ast::Function,
     function_returns: &HashMap<String, Type>,
 ) -> Function {
-    let mut lowerer = Lowerer {
-        function_returns,
-        ..Lowerer::default()
-    };
+    let mut lowerer = Lowerer::new(function_returns);
     lowerer.push_scope();
 
     let parameters = function
@@ -443,14 +440,21 @@ fn lower_function(
     }
 }
 
-#[derive(Default)]
 struct Lowerer<'a> {
     next_binding: usize,
     scopes: Vec<HashMap<String, (BindingId, Type)>>,
     function_returns: &'a HashMap<String, Type>,
 }
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
+    fn new(function_returns: &'a HashMap<String, Type>) -> Self {
+        Self {
+            next_binding: 0,
+            scopes: Vec::new(),
+            function_returns,
+        }
+    }
+
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -793,6 +797,8 @@ impl CfgBuilder {
                         let phi_name = binding_name(&self.blocks, name)
                             .unwrap_or("<binding>")
                             .to_owned();
+                        let ty = binding_type(&self.blocks, name)
+                            .expect("SSA phi binding must have a definition type");
                         let block = &mut self.blocks[block_index];
                         if let Some(phi) =
                             block.phi_nodes.iter_mut().find(|phi| phi.binding == name)
@@ -802,8 +808,6 @@ impl CfgBuilder {
                                 changed = true;
                             }
                         } else {
-                            let ty = binding_type(&self.blocks, name)
-                                .expect("SSA phi binding must have a definition type");
                             block.phi_nodes.push(PhiNode {
                                 id: phi_id,
                                 ty,
