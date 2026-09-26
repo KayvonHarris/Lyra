@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use lyra_ir::{
-    BasicBlock, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator,
+    BasicBlock, BinaryOperator, BindingId, BlockId, Instruction, Module, Terminator, Type, UnaryOperator,
     Value, ValueId, build_cfg,
 };
 
@@ -38,7 +38,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         for parameter in &function.parameters {
             emitter
                 .locals
-                .insert(parameter.name.clone(), format!("%{}", parameter.name));
+                .insert(parameter.binding, format!("%{}", parameter.name));
         }
 
         let cfg = build_cfg(&function.body);
@@ -126,9 +126,9 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 
 struct FunctionEmitter<'a> {
     next_register: usize,
-    locals: HashMap<String, String>,
+    locals: HashMap<BindingId, String>,
     signatures: &'a HashMap<String, Type>,
-    ssa_locals: HashMap<String, String>,
+    ssa_locals: HashMap<BindingId, String>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -149,9 +149,9 @@ impl<'a> FunctionEmitter<'a> {
     fn enter_cfg_block(&mut self, cfg: &lyra_ir::ControlFlowGraph, block: &BasicBlock) {
         self.ssa_locals.clear();
         if let Some(definitions) = cfg.entry_definitions.get(&block.id) {
-            for (name, id) in definitions {
+            for (binding, id) in definitions {
                 self.ssa_locals
-                    .insert(name.clone(), Self::ssa_register(*id));
+                    .insert(*binding, Self::ssa_register(*id));
             }
         }
     }
@@ -206,23 +206,23 @@ impl<'a> FunctionEmitter<'a> {
                 .iter()
                 .find(|definition| definition.instruction_index == instruction_index);
             match instruction {
-                Instruction::Bind { name, value, .. } => {
+                Instruction::Bind { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    self.ssa_locals.insert(name.clone(), operand.clone());
-                    self.locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(*binding, operand.clone());
+                    self.locals.insert(*binding, operand);
                 }
-                Instruction::BindMutable { name, value, .. } => {
+                Instruction::BindMutable { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    self.ssa_locals.insert(name.clone(), operand.clone());
-                    self.locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(*binding, operand.clone());
+                    self.locals.insert(*binding, operand);
                 }
-                Instruction::Assign { name, value, .. } => {
+                Instruction::Assign { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    self.ssa_locals.insert(name.clone(), operand.clone());
-                    self.locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(*binding, operand.clone());
+                    self.locals.insert(*binding, operand);
                 }
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
@@ -322,12 +322,12 @@ impl<'a> FunctionEmitter<'a> {
         match value {
             Value::Integer(value, _) => Ok(value.to_string()),
             Value::Boolean(value, _) => Ok(i64::from(*value).to_string()),
-            Value::Local(name, _) => {
-                if let Some(value) = self.ssa_locals.get(name).cloned() {
+            Value::Local { name, binding, .. } => {
+                if let Some(value) = self.ssa_locals.get(binding).cloned() {
                     Ok(value)
                 } else {
                     self.locals
-                        .get(name)
+                        .get(binding)
                         .cloned()
                         .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))
                 }
