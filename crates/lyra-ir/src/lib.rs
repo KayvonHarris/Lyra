@@ -1546,6 +1546,81 @@ mod tests {
     }
 
     #[test]
+    fn outer_assignment_after_shadow_scope_targets_outer_binding() {
+        let module = lower_source(
+            "fn main() -> Int { var value = 1; if true { var value = 2; value = 3; } value = 4; return value; }",
+        );
+        let outer_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::BindMutable { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let post_scope_assignment = match &module.functions[0].body.instructions[2] {
+            Instruction::Assign { binding, .. } => *binding,
+            _ => panic!("post-scope assignment"),
+        };
+        let return_binding = match &module.functions[0].body.instructions[3] {
+            Instruction::Return {
+                value: Some(Value::Local { binding, .. }),
+                ..
+            } => *binding,
+            _ => panic!("return local"),
+        };
+
+        assert_eq!(post_scope_assignment, outer_binding);
+        assert_eq!(return_binding, outer_binding);
+    }
+
+    #[test]
+    fn sibling_shadow_bindings_do_not_form_cross_scope_phi() {
+        let module = lower_source(
+            "fn main() -> Int { let value = 0; if true { let value = 1; let left = value; } else { let value = 2; let right = value; } return value; }",
+        );
+        let outer_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::Bind { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let cfg = build_cfg(&module.functions[0].body);
+        let merge = cfg
+            .blocks
+            .iter()
+            .find(|block| cfg.predecessors(block.id).len() == 2)
+            .expect("branch merge");
+
+        assert_eq!(
+            cfg.entry_definitions
+                .get(&merge.id)
+                .and_then(|definitions| definitions.get(&outer_binding))
+                .copied(),
+            Some(ValueId(0))
+        );
+        assert!(
+            merge
+                .phi_nodes
+                .iter()
+                .all(|phi| phi.binding == outer_binding || phi.name != "value")
+        );
+    }
+
+    #[test]
+    fn loop_shadow_binding_does_not_create_outer_loop_carried_phi() {
+        let module = lower_source(
+            "fn main() -> Int { var value = 1; while false { var value = 2; value = value + 1; } return value; }",
+        );
+        let outer_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::BindMutable { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let cfg = build_cfg(&module.functions[0].body);
+
+        assert!(
+            cfg.blocks
+                .iter()
+                .flat_map(|block| &block.phi_nodes)
+                .all(|phi| phi.binding != outer_binding)
+        );
+    }
+
+    #[test]
     fn sibling_branch_uses_pre_branch_definition() {
         let module = lower_source(
             "fn main() -> Int { var x = 1; var y = 0; if true { x = 2; } else { y = x; } return y; }",
