@@ -25,6 +25,7 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub name: String,
+    pub binding: BindingId,
     pub ty: Type,
     pub span: Span,
 }
@@ -44,6 +45,9 @@ pub struct BlockId(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValueId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BindingId(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SsaValue {
@@ -118,6 +122,7 @@ pub struct ValueDefinition {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhiNode {
     pub id: ValueId,
+    pub binding: BindingId,
     pub name: String,
     pub incoming: Vec<(BlockId, ValueId)>,
 }
@@ -131,7 +136,7 @@ pub struct BasicBlock {
     pub phi_nodes: Vec<PhiNode>,
 }
 
-pub type DefinitionMap = HashMap<String, ValueId>;
+pub type DefinitionMap = HashMap<BindingId, ValueId>;
 pub type BlockDefinitionMap = HashMap<BlockId, DefinitionMap>;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,18 +215,30 @@ impl ControlFlowGraph {
 
     #[must_use]
     pub fn definition_at_entry(&self, block: BlockId, name: &str) -> Option<ValueId> {
-        self.entry_definitions
-            .get(&block)
-            .and_then(|definitions| definitions.get(name))
-            .copied()
+        self.entry_definitions.get(&block).and_then(|definitions| {
+            definitions
+                .iter()
+                .filter_map(|(binding, value)| {
+                    (binding_name(&self.blocks, *binding) == Some(name))
+                        .then_some((*binding, *value))
+                })
+                .min_by_key(|(binding, _)| *binding)
+                .map(|(_, value)| value)
+        })
     }
 
     #[must_use]
     pub fn definition_at_exit(&self, block: BlockId, name: &str) -> Option<ValueId> {
-        self.exit_definitions
-            .get(&block)
-            .and_then(|definitions| definitions.get(name))
-            .copied()
+        self.exit_definitions.get(&block).and_then(|definitions| {
+            definitions
+                .iter()
+                .filter_map(|(binding, value)| {
+                    (binding_name(&self.blocks, *binding) == Some(name))
+                        .then_some((*binding, *value))
+                })
+                .min_by_key(|(binding, _)| *binding)
+                .map(|(_, value)| value)
+        })
     }
 
     #[must_use]
@@ -246,16 +263,19 @@ impl ControlFlowGraph {
 pub enum Instruction {
     Bind {
         name: String,
+        binding: BindingId,
         value: Value,
         span: Span,
     },
     BindMutable {
         name: String,
+        binding: BindingId,
         value: Value,
         span: Span,
     },
     Assign {
         name: String,
+        binding: BindingId,
         value: Value,
         span: Span,
     },
@@ -309,7 +329,11 @@ pub enum Value {
     Float(f64, Span),
     String(String, Span),
     Boolean(bool, Span),
-    Local(String, Span),
+    Local {
+        name: String,
+        binding: BindingId,
+        span: Span,
+    },
     Call {
         callee: String,
         arguments: Vec<Value>,
@@ -336,7 +360,7 @@ impl Value {
             | Self::Float(_, span)
             | Self::String(_, span)
             | Self::Boolean(_, span)
-            | Self::Local(_, span)
+            | Self::Local { span, .. }
             | Self::Call { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. } => *span,
@@ -358,80 +382,203 @@ pub fn lower(module: &lyra_ast::Module) -> Module {
 }
 
 fn lower_function(function: &lyra_ast::Function) -> Function {
-    Function {
-        name: function.name.clone(),
-        parameters: function
-            .parameters
-            .iter()
-            .map(|parameter| Parameter {
+    let mut lowerer = Lowerer::default();
+    lowerer.push_scope();
+
+    let parameters = function
+        .parameters
+        .iter()
+        .map(|parameter| {
+            let binding = lowerer.declare(&parameter.name);
+            Parameter {
                 name: parameter.name.clone(),
+                binding,
                 ty: parameter
                     .type_name
                     .as_ref()
                     .map_or(Type::Integer, lower_type_name),
                 span: parameter.span,
-            })
-            .collect(),
+            }
+        })
+        .collect();
+
+    let body = lowerer.lower_block(&function.body, false);
+    lowerer.pop_scope();
+
+    Function {
+        name: function.name.clone(),
+        parameters,
         return_type: function
             .return_type
             .as_ref()
             .map_or(Type::Integer, lower_type_name),
-        body: lower_block(&function.body),
+        body,
         span: function.span,
     }
 }
 
-fn lower_block(block: &lyra_ast::Block) -> Block {
-    Block {
-        instructions: block.statements.iter().map(lower_statement).collect(),
-    }
+#[derive(Default)]
+struct Lowerer {
+    next_binding: usize,
+    scopes: Vec<HashMap<String, BindingId>>,
 }
 
-fn lower_statement(statement: &lyra_ast::Statement) -> Instruction {
-    match statement {
-        lyra_ast::Statement::Let { name, value, span } => Instruction::Bind {
-            name: name.clone(),
-            value: lower_expression(value),
-            span: *span,
-        },
-        lyra_ast::Statement::Var { name, value, span } => Instruction::BindMutable {
-            name: name.clone(),
-            value: lower_expression(value),
-            span: *span,
-        },
-        lyra_ast::Statement::Assign { name, value, span } => Instruction::Assign {
-            name: name.clone(),
-            value: lower_expression(value),
-            span: *span,
-        },
-        lyra_ast::Statement::Return { value, span } => Instruction::Return {
-            value: value.as_ref().map(lower_expression),
-            span: *span,
-        },
-        lyra_ast::Statement::If {
-            condition,
-            then_block,
-            else_block,
-            span,
-        } => Instruction::If {
-            condition: lower_expression(condition),
-            then_block: lower_block(then_block),
-            else_block: else_block.as_ref().map(lower_block),
-            span: *span,
-        },
-        lyra_ast::Statement::While {
-            condition,
-            body,
-            span,
-        } => Instruction::While {
-            condition: lower_expression(condition),
-            body: lower_block(body),
-            span: *span,
-        },
-        lyra_ast::Statement::Expression { expression, span } => Instruction::Evaluate {
-            value: lower_expression(expression),
-            span: *span,
-        },
+impl Lowerer {
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop().expect("lowering scope must exist");
+    }
+
+    fn declare(&mut self, name: &str) -> BindingId {
+        let binding = BindingId(self.next_binding);
+        self.next_binding += 1;
+        self.scopes
+            .last_mut()
+            .expect("lowering scope must exist")
+            .insert(name.to_owned(), binding);
+        binding
+    }
+
+    fn resolve(&self, name: &str) -> BindingId {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+            .expect("semantic analysis guarantees resolved local bindings")
+    }
+
+    fn lower_block(&mut self, block: &lyra_ast::Block, nested: bool) -> Block {
+        if nested {
+            self.push_scope();
+        }
+        let instructions = block
+            .statements
+            .iter()
+            .map(|statement| self.lower_statement(statement))
+            .collect();
+        if nested {
+            self.pop_scope();
+        }
+        Block { instructions }
+    }
+
+    fn lower_statement(&mut self, statement: &lyra_ast::Statement) -> Instruction {
+        match statement {
+            lyra_ast::Statement::Let { name, value, span } => {
+                let value = self.lower_expression(value);
+                let binding = self.declare(name);
+                Instruction::Bind {
+                    name: name.clone(),
+                    binding,
+                    value,
+                    span: *span,
+                }
+            }
+            lyra_ast::Statement::Var { name, value, span } => {
+                let value = self.lower_expression(value);
+                let binding = self.declare(name);
+                Instruction::BindMutable {
+                    name: name.clone(),
+                    binding,
+                    value,
+                    span: *span,
+                }
+            }
+            lyra_ast::Statement::Assign { name, value, span } => Instruction::Assign {
+                name: name.clone(),
+                binding: self.resolve(name),
+                value: self.lower_expression(value),
+                span: *span,
+            },
+            lyra_ast::Statement::Return { value, span } => Instruction::Return {
+                value: value.as_ref().map(|value| self.lower_expression(value)),
+                span: *span,
+            },
+            lyra_ast::Statement::If {
+                condition,
+                then_block,
+                else_block,
+                span,
+            } => {
+                let condition = self.lower_expression(condition);
+                let then_block = self.lower_block(then_block, true);
+                let else_block = else_block
+                    .as_ref()
+                    .map(|block| self.lower_block(block, true));
+                Instruction::If {
+                    condition,
+                    then_block,
+                    else_block,
+                    span: *span,
+                }
+            }
+            lyra_ast::Statement::While {
+                condition,
+                body,
+                span,
+            } => {
+                let condition = self.lower_expression(condition);
+                let body = self.lower_block(body, true);
+                Instruction::While {
+                    condition,
+                    body,
+                    span: *span,
+                }
+            }
+            lyra_ast::Statement::Expression { expression, span } => Instruction::Evaluate {
+                value: self.lower_expression(expression),
+                span: *span,
+            },
+        }
+    }
+
+    fn lower_expression(&self, expression: &lyra_ast::Expression) -> Value {
+        match expression {
+            lyra_ast::Expression::Integer(value, span) => Value::Integer(*value, *span),
+            lyra_ast::Expression::Float(value, span) => Value::Float(*value, *span),
+            lyra_ast::Expression::String(value, span) => Value::String(value.clone(), *span),
+            lyra_ast::Expression::Boolean(value, span) => Value::Boolean(*value, *span),
+            lyra_ast::Expression::Identifier(name, span) => Value::Local {
+                name: name.clone(),
+                binding: self.resolve(name),
+                span: *span,
+            },
+            lyra_ast::Expression::Call {
+                callee,
+                arguments,
+                span,
+            } => Value::Call {
+                callee: callee.clone(),
+                arguments: arguments
+                    .iter()
+                    .map(|argument| self.lower_expression(argument))
+                    .collect(),
+                span: *span,
+            },
+            lyra_ast::Expression::Unary {
+                operator,
+                operand,
+                span,
+            } => Value::Unary {
+                operator: lower_unary_operator(*operator),
+                operand: Box::new(self.lower_expression(operand)),
+                span: *span,
+            },
+            lyra_ast::Expression::Binary {
+                left,
+                operator,
+                right,
+                span,
+            } => Value::Binary {
+                left: Box::new(self.lower_expression(left)),
+                operator: lower_binary_operator(*operator),
+                right: Box::new(self.lower_expression(right)),
+                span: *span,
+            },
+        }
     }
 }
 
@@ -482,7 +629,7 @@ impl CfgBuilder {
     fn construct_ssa(&mut self) -> (BlockDefinitionMap, BlockDefinitionMap) {
         let mut entry: BlockDefinitionMap = HashMap::new();
         let mut exit: BlockDefinitionMap = HashMap::new();
-        let mut phi_ids: HashMap<(BlockId, String), ValueId> = HashMap::new();
+        let mut phi_ids: HashMap<(BlockId, BindingId), ValueId> = HashMap::new();
 
         loop {
             let mut changed = false;
@@ -496,13 +643,13 @@ impl CfgBuilder {
 
                 if predecessors.len() == 1 {
                     if let Some(definitions) = exit.get(&predecessors[0]) {
-                        incoming.extend(definitions.iter().map(|(name, id)| (name.clone(), *id)));
+                        incoming.extend(definitions.iter().map(|(binding, id)| (*binding, *id)));
                     }
                 } else if predecessors.len() >= 2 {
                     let mut names = predecessors
                         .iter()
                         .filter_map(|predecessor| exit.get(predecessor))
-                        .flat_map(|definitions| definitions.keys().cloned())
+                        .flat_map(|definitions| definitions.keys().copied())
                         .collect::<Vec<_>>();
                     names.sort();
                     names.dedup();
@@ -533,7 +680,7 @@ impl CfgBuilder {
                             continue;
                         }
 
-                        let key = (block_id, name.clone());
+                        let key = (block_id, name);
                         if all_same && !phi_ids.contains_key(&key) {
                             incoming.insert(name, first);
                             continue;
@@ -555,8 +702,13 @@ impl CfgBuilder {
                             })
                             .collect::<Vec<_>>();
 
+                        let phi_name = binding_name(&self.blocks, name)
+                            .unwrap_or("<binding>")
+                            .to_owned();
                         let block = &mut self.blocks[block_index];
-                        if let Some(phi) = block.phi_nodes.iter_mut().find(|phi| phi.name == name) {
+                        if let Some(phi) =
+                            block.phi_nodes.iter_mut().find(|phi| phi.binding == name)
+                        {
                             if phi.incoming != phi_incoming {
                                 phi.incoming = phi_incoming;
                                 changed = true;
@@ -564,12 +716,11 @@ impl CfgBuilder {
                         } else {
                             block.phi_nodes.push(PhiNode {
                                 id: phi_id,
-                                name: name.clone(),
+                                binding: name,
+                                name: phi_name,
                                 incoming: phi_incoming,
                             });
-                            block
-                                .phi_nodes
-                                .sort_by(|left, right| left.name.cmp(&right.name));
+                            block.phi_nodes.sort_by_key(|phi| phi.binding);
                             changed = true;
                         }
                         incoming.insert(name, phi_id);
@@ -586,9 +737,9 @@ impl CfgBuilder {
                     if let Some(instruction) = self.blocks[block_index]
                         .instructions
                         .get(definition.instruction_index)
-                        && let Some(name) = defined_name(instruction)
+                        && let Some(binding) = defined_binding(instruction)
                     {
-                        outgoing.insert(name.to_owned(), definition.id);
+                        outgoing.insert(binding, definition.id);
                     }
                 }
 
@@ -625,9 +776,9 @@ impl CfgBuilder {
                 );
                 self.blocks[block_index].definitions[definition_index].uses = uses;
 
-                if let Some(name) = defined_name(&instruction) {
+                if let Some(name) = defined_binding(&instruction) {
                     let id = self.blocks[block_index].definitions[definition_index].id;
-                    environment.insert(name.to_owned(), id);
+                    environment.insert(name, id);
                 }
             }
         }
@@ -760,7 +911,7 @@ impl CfgBuilder {
                     let instruction_index = self.blocks[current.0].instructions.len();
                     self.blocks[current.0].instructions.push(other.clone());
 
-                    if defined_name(other).is_some() {
+                    if defined_binding(other).is_some() {
                         let id = ValueId(self.next_value);
                         self.next_value += 1;
                         self.blocks[current.0].definitions.push(ValueDefinition {
@@ -796,8 +947,8 @@ fn collect_value_uses_from_environment(
     };
 
     match value {
-        Value::Local(name, _) => {
-            if let Some(id) = environment.get(name) {
+        Value::Local { binding, .. } => {
+            if let Some(id) = environment.get(binding) {
                 uses.push(*id);
             }
         }
@@ -829,6 +980,18 @@ fn terminator_targets(terminator: &Terminator) -> Vec<BlockId> {
     }
 }
 
+fn defined_binding(instruction: &Instruction) -> Option<BindingId> {
+    match instruction {
+        Instruction::Bind { binding, .. }
+        | Instruction::BindMutable { binding, .. }
+        | Instruction::Assign { binding, .. } => Some(*binding),
+        Instruction::Evaluate { .. }
+        | Instruction::Return { .. }
+        | Instruction::If { .. }
+        | Instruction::While { .. } => None,
+    }
+}
+
 fn defined_name(instruction: &Instruction) -> Option<&str> {
     match instruction {
         Instruction::Bind { name, .. }
@@ -841,43 +1004,15 @@ fn defined_name(instruction: &Instruction) -> Option<&str> {
     }
 }
 
-fn lower_expression(expression: &lyra_ast::Expression) -> Value {
-    match expression {
-        lyra_ast::Expression::Integer(value, span) => Value::Integer(*value, *span),
-        lyra_ast::Expression::Float(value, span) => Value::Float(*value, *span),
-        lyra_ast::Expression::String(value, span) => Value::String(value.clone(), *span),
-        lyra_ast::Expression::Boolean(value, span) => Value::Boolean(*value, *span),
-        lyra_ast::Expression::Identifier(name, span) => Value::Local(name.clone(), *span),
-        lyra_ast::Expression::Call {
-            callee,
-            arguments,
-            span,
-        } => Value::Call {
-            callee: callee.clone(),
-            arguments: arguments.iter().map(lower_expression).collect(),
-            span: *span,
-        },
-        lyra_ast::Expression::Unary {
-            operator,
-            operand,
-            span,
-        } => Value::Unary {
-            operator: lower_unary_operator(*operator),
-            operand: Box::new(lower_expression(operand)),
-            span: *span,
-        },
-        lyra_ast::Expression::Binary {
-            left,
-            operator,
-            right,
-            span,
-        } => Value::Binary {
-            left: Box::new(lower_expression(left)),
-            operator: lower_binary_operator(*operator),
-            right: Box::new(lower_expression(right)),
-            span: *span,
-        },
-    }
+fn binding_name(blocks: &[BasicBlock], binding: BindingId) -> Option<&str> {
+    blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find_map(|instruction| {
+            (defined_binding(instruction) == Some(binding))
+                .then(|| defined_name(instruction))
+                .flatten()
+        })
 }
 
 fn lower_type_name(type_name: &lyra_ast::TypeName) -> Type {
@@ -943,7 +1078,7 @@ mod tests {
         assert!(matches!(
             &module.functions[0].body.instructions[1],
             Instruction::Return {
-                value: Some(Value::Local(name, _)),
+                value: Some(Value::Local { name, .. }),
                 ..
             } if name == "speed"
         ));
@@ -1210,6 +1345,7 @@ mod tests {
     fn basic_blocks_can_record_phi_nodes() {
         let phi = PhiNode {
             id: ValueId(4),
+            binding: BindingId(0),
             name: "counter".to_owned(),
             incoming: vec![(BlockId(1), ValueId(2)), (BlockId(2), ValueId(3))],
         };
@@ -1232,6 +1368,22 @@ mod tests {
         assert_eq!(definition.id, ValueId(3));
         assert_eq!(definition.instruction_index, 1);
         assert_eq!(definition.uses, vec![ValueId(1), ValueId(2)]);
+    }
+
+    #[test]
+    fn inner_shadow_does_not_replace_outer_definition_after_branch() {
+        let module = lower_source(
+            "fn main() -> Int { let value = 1; if true { let value = 2; let inner = value; } return value; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+        let merge = cfg
+            .blocks
+            .iter()
+            .find(|block| cfg.predecessors(block.id).len() == 2)
+            .expect("branch merge");
+
+        assert_eq!(cfg.definition_at_entry(merge.id, "value"), Some(ValueId(0)));
+        assert!(merge.phi_nodes.iter().all(|phi| phi.name != "value"));
     }
 
     #[test]

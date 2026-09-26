@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use lyra_ir::{
-    BasicBlock, BinaryOperator, BlockId, Instruction, Module, Terminator, Type, UnaryOperator,
-    Value, ValueId, build_cfg,
+    BasicBlock, BinaryOperator, BindingId, BlockId, Instruction, Module, Terminator, Type,
+    UnaryOperator, Value, ValueId, build_cfg,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
         for parameter in &function.parameters {
             emitter
                 .locals
-                .insert(parameter.name.clone(), format!("%{}", parameter.name));
+                .insert(parameter.binding, format!("%{}", parameter.name));
         }
 
         let cfg = build_cfg(&function.body);
@@ -126,9 +126,9 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 
 struct FunctionEmitter<'a> {
     next_register: usize,
-    locals: HashMap<String, String>,
+    locals: HashMap<BindingId, String>,
     signatures: &'a HashMap<String, Type>,
-    ssa_locals: HashMap<String, String>,
+    ssa_locals: HashMap<BindingId, String>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -149,9 +149,8 @@ impl<'a> FunctionEmitter<'a> {
     fn enter_cfg_block(&mut self, cfg: &lyra_ir::ControlFlowGraph, block: &BasicBlock) {
         self.ssa_locals.clear();
         if let Some(definitions) = cfg.entry_definitions.get(&block.id) {
-            for (name, id) in definitions {
-                self.ssa_locals
-                    .insert(name.clone(), Self::ssa_register(*id));
+            for (binding, id) in definitions {
+                self.ssa_locals.insert(*binding, Self::ssa_register(*id));
             }
         }
     }
@@ -206,23 +205,23 @@ impl<'a> FunctionEmitter<'a> {
                 .iter()
                 .find(|definition| definition.instruction_index == instruction_index);
             match instruction {
-                Instruction::Bind { name, value, .. } => {
+                Instruction::Bind { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    self.ssa_locals.insert(name.clone(), operand.clone());
-                    self.locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(*binding, operand.clone());
+                    self.locals.insert(*binding, operand);
                 }
-                Instruction::BindMutable { name, value, .. } => {
+                Instruction::BindMutable { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    self.ssa_locals.insert(name.clone(), operand.clone());
-                    self.locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(*binding, operand.clone());
+                    self.locals.insert(*binding, operand);
                 }
-                Instruction::Assign { name, value, .. } => {
+                Instruction::Assign { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body);
-                    self.ssa_locals.insert(name.clone(), operand.clone());
-                    self.locals.insert(name.clone(), operand);
+                    self.ssa_locals.insert(*binding, operand.clone());
+                    self.locals.insert(*binding, operand);
                 }
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
@@ -322,12 +321,12 @@ impl<'a> FunctionEmitter<'a> {
         match value {
             Value::Integer(value, _) => Ok(value.to_string()),
             Value::Boolean(value, _) => Ok(i64::from(*value).to_string()),
-            Value::Local(name, _) => {
-                if let Some(value) = self.ssa_locals.get(name).cloned() {
+            Value::Local { name, binding, .. } => {
+                if let Some(value) = self.ssa_locals.get(binding).cloned() {
                     Ok(value)
                 } else {
                     self.locals
-                        .get(name)
+                        .get(binding)
                         .cloned()
                         .ok_or_else(|| CodegenError::UnknownLocal(name.clone()))
                 }
@@ -425,6 +424,14 @@ mod tests {
     use super::*;
     use lyra_ir::{Block, Function, Type};
     use lyra_span::Span;
+
+    fn local(name: &str, binding: usize, span: Span) -> Value {
+        Value::Local {
+            name: name.into(),
+            binding: BindingId(binding),
+            span,
+        }
+    }
 
     #[test]
     fn emits_unit_call_without_result_register() {
@@ -643,11 +650,13 @@ mod tests {
                     parameters: vec![
                         lyra_ir::Parameter {
                             name: "a".into(),
+                            binding: BindingId(0),
                             ty: Type::Integer,
                             span,
                         },
                         lyra_ir::Parameter {
                             name: "b".into(),
+                            binding: BindingId(1),
                             ty: Type::Integer,
                             span,
                         },
@@ -656,9 +665,9 @@ mod tests {
                     body: Block {
                         instructions: vec![Instruction::Return {
                             value: Some(Value::Binary {
-                                left: Box::new(Value::Local("a".into(), span)),
+                                left: Box::new(local("a", 0, span)),
                                 operator: BinaryOperator::Add,
-                                right: Box::new(Value::Local("b".into(), span)),
+                                right: Box::new(local("b", 1, span)),
                                 span,
                             }),
                             span,
@@ -781,12 +790,13 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "counter".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local("counter".into(), span)),
+                                left: Box::new(local("counter", 0, span)),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -794,8 +804,9 @@ mod tests {
                             body: Block {
                                 instructions: vec![Instruction::Assign {
                                     name: "counter".into(),
+                                    binding: BindingId(0),
                                     value: Value::Binary {
-                                        left: Box::new(Value::Local("counter".into(), span)),
+                                        left: Box::new(local("counter", 0, span)),
                                         operator: BinaryOperator::Add,
                                         right: Box::new(Value::Integer(1, span)),
                                         span,
@@ -806,7 +817,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("counter".into(), span)),
+                            value: Some(local("counter", 0, span)),
                             span,
                         },
                     ],
@@ -839,17 +850,19 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "counter".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
                         Instruction::BindMutable {
                             name: "total".into(),
+                            binding: BindingId(1),
                             value: Value::Integer(10, span),
                             span,
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local("counter".into(), span)),
+                                left: Box::new(local("counter", 0, span)),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -858,18 +871,20 @@ mod tests {
                                 instructions: vec![
                                     Instruction::Assign {
                                         name: "total".into(),
+                                        binding: BindingId(1),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local("total".into(), span)),
+                                            left: Box::new(local("total", 1, span)),
                                             operator: BinaryOperator::Add,
-                                            right: Box::new(Value::Local("counter".into(), span)),
+                                            right: Box::new(local("counter", 0, span)),
                                             span,
                                         },
                                         span,
                                     },
                                     Instruction::Assign {
                                         name: "counter".into(),
+                                        binding: BindingId(0),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            left: Box::new(local("counter", 0, span)),
                                             operator: BinaryOperator::Add,
                                             right: Box::new(Value::Integer(1, span)),
                                             span,
@@ -881,7 +896,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("total".into(), span)),
+                            value: Some(local("total", 1, span)),
                             span,
                         },
                     ],
@@ -934,17 +949,19 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "counter".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
                         Instruction::BindMutable {
                             name: "total".into(),
+                            binding: BindingId(1),
                             value: Value::Integer(0, span),
                             span,
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local("counter".into(), span)),
+                                left: Box::new(local("counter", 0, span)),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -953,7 +970,7 @@ mod tests {
                                 instructions: vec![
                                     Instruction::If {
                                         condition: Value::Binary {
-                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            left: Box::new(local("counter", 0, span)),
                                             operator: BinaryOperator::Equal,
                                             right: Box::new(Value::Integer(1, span)),
                                             span,
@@ -961,11 +978,9 @@ mod tests {
                                         then_block: Block {
                                             instructions: vec![Instruction::Assign {
                                                 name: "total".into(),
+                                                binding: BindingId(1),
                                                 value: Value::Binary {
-                                                    left: Box::new(Value::Local(
-                                                        "total".into(),
-                                                        span,
-                                                    )),
+                                                    left: Box::new(local("total", 1, span)),
                                                     operator: BinaryOperator::Add,
                                                     right: Box::new(Value::Integer(10, span)),
                                                     span,
@@ -976,11 +991,9 @@ mod tests {
                                         else_block: Some(Block {
                                             instructions: vec![Instruction::Assign {
                                                 name: "total".into(),
+                                                binding: BindingId(1),
                                                 value: Value::Binary {
-                                                    left: Box::new(Value::Local(
-                                                        "total".into(),
-                                                        span,
-                                                    )),
+                                                    left: Box::new(local("total", 1, span)),
                                                     operator: BinaryOperator::Add,
                                                     right: Box::new(Value::Integer(1, span)),
                                                     span,
@@ -992,8 +1005,9 @@ mod tests {
                                     },
                                     Instruction::Assign {
                                         name: "counter".into(),
+                                        binding: BindingId(0),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local("counter".into(), span)),
+                                            left: Box::new(local("counter", 0, span)),
                                             operator: BinaryOperator::Add,
                                             right: Box::new(Value::Integer(1, span)),
                                             span,
@@ -1005,7 +1019,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("total".into(), span)),
+                            value: Some(local("total", 1, span)),
                             span,
                         },
                     ],
@@ -1043,6 +1057,7 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "value".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
@@ -1051,6 +1066,7 @@ mod tests {
                             then_block: Block {
                                 instructions: vec![Instruction::Assign {
                                     name: "value".into(),
+                                    binding: BindingId(0),
                                     value: Value::Integer(20, span),
                                     span,
                                 }],
@@ -1058,6 +1074,7 @@ mod tests {
                             else_block: Some(Block {
                                 instructions: vec![Instruction::Assign {
                                     name: "value".into(),
+                                    binding: BindingId(0),
                                     value: Value::Integer(22, span),
                                     span,
                                 }],
@@ -1065,7 +1082,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("value".into(), span)),
+                            value: Some(local("value", 0, span)),
                             span,
                         },
                     ],
@@ -1095,6 +1112,7 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "value".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
@@ -1103,6 +1121,7 @@ mod tests {
                             then_block: Block {
                                 instructions: vec![Instruction::Assign {
                                     name: "value".into(),
+                                    binding: BindingId(0),
                                     value: Value::Integer(20, span),
                                     span,
                                 }],
@@ -1110,6 +1129,7 @@ mod tests {
                             else_block: Some(Block {
                                 instructions: vec![Instruction::Assign {
                                     name: "value".into(),
+                                    binding: BindingId(0),
                                     value: Value::Integer(22, span),
                                     span,
                                 }],
@@ -1117,7 +1137,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("value".into(), span)),
+                            value: Some(local("value", 0, span)),
                             span,
                         },
                     ],
@@ -1147,12 +1167,13 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "counter".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local("counter".into(), span)),
+                                left: Box::new(local("counter", 0, span)),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -1160,8 +1181,9 @@ mod tests {
                             body: Block {
                                 instructions: vec![Instruction::Assign {
                                     name: "counter".into(),
+                                    binding: BindingId(0),
                                     value: Value::Binary {
-                                        left: Box::new(Value::Local("counter".into(), span)),
+                                        left: Box::new(local("counter", 0, span)),
                                         operator: BinaryOperator::Add,
                                         right: Box::new(Value::Integer(1, span)),
                                         span,
@@ -1172,7 +1194,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("counter".into(), span)),
+                            value: Some(local("counter", 0, span)),
                             span,
                         },
                     ],
@@ -1206,13 +1228,15 @@ mod tests {
                     instructions: vec![
                         Instruction::BindMutable {
                             name: "counter".into(),
+                            binding: BindingId(0),
                             value: Value::Integer(0, span),
                             span,
                         },
                         Instruction::Assign {
                             name: "counter".into(),
+                            binding: BindingId(0),
                             value: Value::Binary {
-                                left: Box::new(Value::Local("counter".into(), span)),
+                                left: Box::new(local("counter", 0, span)),
                                 operator: BinaryOperator::Add,
                                 right: Box::new(Value::Integer(1, span)),
                                 span,
@@ -1220,7 +1244,7 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local("counter".into(), span)),
+                            value: Some(local("counter", 0, span)),
                             span,
                         },
                     ],
