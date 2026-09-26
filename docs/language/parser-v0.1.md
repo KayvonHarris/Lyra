@@ -1,36 +1,47 @@
 # Lyra Parser v0.1 Grammar
 
-This document records the syntax intentionally supported by Parser v0.1. It is a compatibility target for the parser and its tests, not a promise that later Lyra versions will retain every surface form unchanged.
+This document records the syntax currently supported by Parser v0.1. It is a compatibility target for the parser and its tests, not a promise that later Lyra versions will retain every surface form unchanged.
 
 ## Module and items
 
-A source file is a sequence of items. Parser v0.1 supports zero-parameter function declarations:
+A source file is a sequence of function declarations. Functions may declare parameters with optional type annotations and an optional return type.
 
 ```text
-module      := function* EOF
-function    := "fn" IDENTIFIER "(" ")" block
-block       := "{" statement* "}"
+module       := function* EOF
+function     := "fn" IDENTIFIER "(" parameters? ")" ("->" type_name)? block
+parameters   := parameter ("," parameter)*
+parameter    := IDENTIFIER (":" type_name)?
+type_name    := IDENTIFIER
+block        := "{" statement* "}"
 ```
 
-Function parameters, return types, structs, enums, imports, and other item forms are reserved for later parser milestones.
+Structs, enums, imports, and other item forms are outside the current parser subset.
 
 ## Statements
 
 ```text
 statement   := let_statement
+             | var_statement
+             | assignment_statement
              | return_statement
+             | if_statement
+             | while_statement
              | expression_statement
 
 let_statement        := "let" IDENTIFIER "=" expression ";"
+var_statement        := "var" IDENTIFIER "=" expression ";"
+assignment_statement := IDENTIFIER "=" expression ";"
 return_statement     := "return" expression? ";"
+if_statement         := "if" expression block ("else" block)?
+while_statement      := "while" expression block
 expression_statement := expression ";"
 ```
 
-`var` is tokenized by the lexer but is not part of Parser v0.1 syntax yet.
+`let` introduces an immutable binding. `var` introduces a mutable binding; assignment syntax is parsed separately and semantic analysis determines whether the target may be assigned.
 
 ## Expressions
 
-Parser v0.1 supports literals, identifiers, grouping, unary operators, and left-associative binary operators.
+Parser v0.1 supports literals, identifiers, function calls, grouping, unary operators, and left-associative binary operators.
 
 ```text
 expression   := logical_or
@@ -41,8 +52,10 @@ comparison   := term (("<" | "<=" | ">" | ">=") term)*
 term         := factor (("+" | "-") factor)*
 factor       := unary (("*" | "/" | "%") unary)*
 unary        := ("!" | "-") unary | primary
-primary      := INTEGER | FLOAT | STRING | "true" | "false" | IDENTIFIER
+primary      := INTEGER | FLOAT | STRING | "true" | "false"
+              | IDENTIFIER ("(" arguments? ")")?
               | "(" expression ")"
+arguments    := expression ("," expression)*
 ```
 
 From lowest to highest precedence, the binary operator groups are `||`, `&&`, equality, comparison, addition/subtraction, and multiplication/division/remainder. Unary `!` and unary `-` bind more tightly than binary operators. Parentheses override normal precedence.
@@ -51,6 +64,6 @@ From lowest to highest precedence, the binary operator groups are `||`, `&&`, eq
 
 Syntax errors produce parser diagnostics with source spans. Parser v0.1 performs basic synchronization at statement and item boundaries so one malformed construct does not necessarily prevent later constructs from being parsed. Recovery behavior is best-effort and will be refined as the grammar grows.
 
-## Non-goals for v0.1
+## Parser boundaries
 
-Parser v0.1 does not perform name resolution, type checking, constant evaluation, ownership analysis, lowering to Lyra IR, or code generation. Those belong to later compiler stages.
+The parser recognizes syntax only. Name resolution, type checking, mutability enforcement, control-flow validation, Lyra IR lowering, and code generation belong to later compiler stages.
