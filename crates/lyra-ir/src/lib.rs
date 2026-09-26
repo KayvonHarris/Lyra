@@ -1387,6 +1387,165 @@ mod tests {
     }
 
     #[test]
+    fn shadow_initializer_reads_outer_binding() {
+        let module = lower_source(
+            "fn main() -> Int { let value = 1; if true { let value = value + 1; return value; } return value; }",
+        );
+        let outer_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::Bind { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let inner_binding = match &module.functions[0].body.instructions[1] {
+            Instruction::If { then_block, .. } => match &then_block.instructions[0] {
+                Instruction::Bind { binding, value, .. } => {
+                    assert!(matches!(
+                        value,
+                        Value::Binary { left, .. }
+                            if matches!(left.as_ref(), Value::Local { binding, .. } if *binding == outer_binding)
+                    ));
+                    *binding
+                }
+                _ => panic!("inner binding"),
+            },
+            _ => panic!("if statement"),
+        };
+
+        assert_ne!(outer_binding, inner_binding);
+    }
+
+    #[test]
+    fn nested_shadow_levels_keep_distinct_binding_ids() {
+        let module = lower_source(
+            "fn main() -> Int { let value = 1; if true { let value = 2; if true { let value = 3; return value; } return value; } return value; }",
+        );
+        let outer = match &module.functions[0].body.instructions[0] {
+            Instruction::Bind { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let (middle, inner) = match &module.functions[0].body.instructions[1] {
+            Instruction::If { then_block, .. } => {
+                let middle = match &then_block.instructions[0] {
+                    Instruction::Bind { binding, .. } => *binding,
+                    _ => panic!("middle binding"),
+                };
+                let inner = match &then_block.instructions[1] {
+                    Instruction::If { then_block, .. } => match &then_block.instructions[0] {
+                        Instruction::Bind { binding, .. } => *binding,
+                        _ => panic!("inner binding"),
+                    },
+                    _ => panic!("nested if"),
+                };
+                (middle, inner)
+            }
+            _ => panic!("outer if"),
+        };
+
+        assert_ne!(outer, middle);
+        assert_ne!(middle, inner);
+        assert_ne!(outer, inner);
+    }
+
+    #[test]
+    fn loop_local_shadow_does_not_replace_outer_binding() {
+        let module = lower_source(
+            "fn main() -> Int { let value = 1; while false { let value = 2; let inner = value; } return value; }",
+        );
+        let outer_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::Bind { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let return_binding = match module.functions[0].body.instructions.last() {
+            Some(Instruction::Return {
+                value: Some(Value::Local { binding, .. }),
+                ..
+            }) => *binding,
+            _ => panic!("return local"),
+        };
+
+        assert_eq!(return_binding, outer_binding);
+    }
+
+    #[test]
+    fn assignment_inside_shadow_scope_targets_inner_binding() {
+        let module = lower_source(
+            "fn main() -> Int { var value = 1; if true { var value = 2; value = value + 1; } return value; }",
+        );
+        let outer_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::BindMutable { binding, .. } => *binding,
+            _ => panic!("outer binding"),
+        };
+        let (inner_binding, assignment_binding) = match &module.functions[0].body.instructions[1] {
+            Instruction::If { then_block, .. } => {
+                let inner = match &then_block.instructions[0] {
+                    Instruction::BindMutable { binding, .. } => *binding,
+                    _ => panic!("inner binding"),
+                };
+                let assignment = match &then_block.instructions[1] {
+                    Instruction::Assign { binding, .. } => *binding,
+                    _ => panic!("inner assignment"),
+                };
+                (inner, assignment)
+            }
+            _ => panic!("if statement"),
+        };
+
+        assert_ne!(outer_binding, inner_binding);
+        assert_eq!(assignment_binding, inner_binding);
+    }
+
+    #[test]
+    fn sibling_scopes_with_same_name_have_distinct_bindings() {
+        let module = lower_source(
+            "fn main() -> Int { if true { let value = 1; } else { let value = 2; } return 0; }",
+        );
+        let (then_binding, else_binding) = match &module.functions[0].body.instructions[0] {
+            Instruction::If {
+                then_block,
+                else_block: Some(else_block),
+                ..
+            } => {
+                let then_binding = match &then_block.instructions[0] {
+                    Instruction::Bind { binding, .. } => *binding,
+                    _ => panic!("then binding"),
+                };
+                let else_binding = match &else_block.instructions[0] {
+                    Instruction::Bind { binding, .. } => *binding,
+                    _ => panic!("else binding"),
+                };
+                (then_binding, else_binding)
+            }
+            _ => panic!("if statement"),
+        };
+
+        assert_ne!(then_binding, else_binding);
+    }
+
+    #[test]
+    fn parameter_shadowing_uses_distinct_binding_identity() {
+        let module = lower_source(
+            "fn choose(value: Int) -> Int { if true { let value = 2; return value; } return value; }",
+        );
+        let parameter_binding = module.functions[0].parameters[0].binding;
+        let inner_binding = match &module.functions[0].body.instructions[0] {
+            Instruction::If { then_block, .. } => match &then_block.instructions[0] {
+                Instruction::Bind { binding, .. } => *binding,
+                _ => panic!("inner binding"),
+            },
+            _ => panic!("if statement"),
+        };
+        let outer_return_binding = match &module.functions[0].body.instructions[1] {
+            Instruction::Return {
+                value: Some(Value::Local { binding, .. }),
+                ..
+            } => *binding,
+            _ => panic!("outer return"),
+        };
+
+        assert_ne!(parameter_binding, inner_binding);
+        assert_eq!(outer_return_binding, parameter_binding);
+    }
+
+    #[test]
     fn sibling_branch_uses_pre_branch_definition() {
         let module = lower_source(
             "fn main() -> Int { var x = 1; var y = 0; if true { x = 2; } else { y = x; } return y; }",
