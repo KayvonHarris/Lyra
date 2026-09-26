@@ -43,9 +43,17 @@ fn run_executes_native_program_and_propagates_exit_status() {
     let leftovers = fs::read_dir(std::env::temp_dir())
         .expect("system temp directory should be readable")
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&format!("{stem}-")))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("{stem}-"))
+        })
         .collect::<Vec<_>>();
-    assert!(leftovers.is_empty(), "native run left temporary artifacts: {leftovers:?}");
+    assert!(
+        leftovers.is_empty(),
+        "native run left temporary artifacts: {leftovers:?}"
+    );
 
     fs::remove_dir_all(&temp).expect("temporary test directory should be removed");
 }
