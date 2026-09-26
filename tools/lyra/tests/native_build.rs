@@ -18,7 +18,11 @@ fn unique_temp_dir() -> PathBuf {
 
 #[test]
 fn build_creates_runnable_native_executable_without_llvm_sidecar() {
-    if Command::new("clang").arg("--version").output().is_err() {
+    let clang_available = Command::new("clang")
+        .arg("--version")
+        .status()
+        .is_ok_and(|status| status.success());
+    if !clang_available {
         eprintln!("skipping native build test because clang is unavailable");
         return;
     }
