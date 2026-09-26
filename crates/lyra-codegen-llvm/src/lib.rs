@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use lyra_ir::{
-    BasicBlock, BinaryOperator, BindingId, BlockId, Instruction, Module, Terminator, Type, UnaryOperator,
-    Value, ValueId, build_cfg,
+    BasicBlock, BinaryOperator, BindingId, BlockId, Instruction, Module, Terminator, Type,
+    UnaryOperator, Value, ValueId, build_cfg,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,8 +150,7 @@ impl<'a> FunctionEmitter<'a> {
         self.ssa_locals.clear();
         if let Some(definitions) = cfg.entry_definitions.get(&block.id) {
             for (binding, id) in definitions {
-                self.ssa_locals
-                    .insert(*binding, Self::ssa_register(*id));
+                self.ssa_locals.insert(*binding, Self::ssa_register(*id));
             }
         }
     }
