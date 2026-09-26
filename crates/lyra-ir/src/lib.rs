@@ -702,6 +702,9 @@ impl CfgBuilder {
                             })
                             .collect::<Vec<_>>();
 
+                        let phi_name = binding_name(&self.blocks, name)
+                            .unwrap_or("<binding>")
+                            .to_owned();
                         let block = &mut self.blocks[block_index];
                         if let Some(phi) =
                             block.phi_nodes.iter_mut().find(|phi| phi.binding == name)
@@ -714,9 +717,7 @@ impl CfgBuilder {
                             block.phi_nodes.push(PhiNode {
                                 id: phi_id,
                                 binding: name,
-                                name: binding_name(&self.blocks, name)
-                                    .unwrap_or("<binding>")
-                                    .to_owned(),
+                                name: phi_name,
                                 incoming: phi_incoming,
                             });
                             block.phi_nodes.sort_by_key(|phi| phi.binding);
