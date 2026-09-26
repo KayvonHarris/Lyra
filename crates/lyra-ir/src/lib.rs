@@ -643,7 +643,7 @@ impl CfgBuilder {
 
                 if predecessors.len() == 1 {
                     if let Some(definitions) = exit.get(&predecessors[0]) {
-                        incoming.extend(definitions.iter().map(|(name, id)| (name.clone(), *id)));
+                        incoming.extend(definitions.iter().map(|(binding, id)| (*binding, *id)));
                     }
                 } else if predecessors.len() >= 2 {
                     let mut names = predecessors
