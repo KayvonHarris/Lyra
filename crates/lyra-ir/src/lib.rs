@@ -477,13 +477,22 @@ impl Lowerer {
                 value: value.as_ref().map(|value| self.lower_expression(value)),
                 span: *span,
             },
-            lyra_ast::Statement::If { condition, then_block, else_block, span } => {
+            lyra_ast::Statement::If {
+                condition,
+                then_block,
+                else_block,
+                span,
+            } => {
                 let condition = self.lower_expression(condition);
                 let then_block = self.lower_block(then_block, true);
                 let else_block = else_block.as_ref().map(|block| self.lower_block(block, true));
                 Instruction::If { condition, then_block, else_block, span: *span }
             }
-            lyra_ast::Statement::While { condition, body, span } => {
+            lyra_ast::Statement::While {
+                condition,
+                body,
+                span,
+            } => {
                 let condition = self.lower_expression(condition);
                 let body = self.lower_block(body, true);
                 Instruction::While { condition, body, span: *span }
@@ -506,17 +515,33 @@ impl Lowerer {
                 binding: self.resolve(name),
                 span: *span,
             },
-            lyra_ast::Expression::Call { callee, arguments, span } => Value::Call {
+            lyra_ast::Expression::Call {
+                callee,
+                arguments,
+                span,
+            } => Value::Call {
                 callee: callee.clone(),
-                arguments: arguments.iter().map(|argument| self.lower_expression(argument)).collect(),
+                arguments: arguments
+                    .iter()
+                    .map(|argument| self.lower_expression(argument))
+                    .collect(),
                 span: *span,
             },
-            lyra_ast::Expression::Unary { operator, operand, span } => Value::Unary {
+            lyra_ast::Expression::Unary {
+                operator,
+                operand,
+                span,
+            } => Value::Unary {
                 operator: lower_unary_operator(*operator),
                 operand: Box::new(self.lower_expression(operand)),
                 span: *span,
             },
-            lyra_ast::Expression::Binary { left, operator, right, span } => Value::Binary {
+            lyra_ast::Expression::Binary {
+                left,
+                operator,
+                right,
+                span,
+            } => Value::Binary {
                 left: Box::new(self.lower_expression(left)),
                 operator: lower_binary_operator(*operator),
                 right: Box::new(self.lower_expression(right)),
@@ -647,7 +672,9 @@ impl CfgBuilder {
                             .collect::<Vec<_>>();
 
                         let block = &mut self.blocks[block_index];
-                        if let Some(phi) = block.phi_nodes.iter_mut().find(|phi| phi.binding == name) {
+                        if let Some(phi) =
+                            block.phi_nodes.iter_mut().find(|phi| phi.binding == name)
+                        {
                             if phi.incoming != phi_incoming {
                                 phi.incoming = phi_incoming;
                                 changed = true;
@@ -656,12 +683,12 @@ impl CfgBuilder {
                             block.phi_nodes.push(PhiNode {
                                 id: phi_id,
                                 binding: name,
-                                name: binding_name(&self.blocks, name).unwrap_or("<binding>").to_owned(),
+                                name: binding_name(&self.blocks, name)
+                                    .unwrap_or("<binding>")
+                                    .to_owned(),
                                 incoming: phi_incoming,
                             });
-                            block
-                                .phi_nodes
-                                .sort_by_key(|phi| phi.binding);
+                            block.phi_nodes.sort_by_key(|phi| phi.binding);
                             changed = true;
                         }
                         incoming.insert(name, phi_id);
@@ -946,9 +973,14 @@ fn defined_name(instruction: &Instruction) -> Option<&str> {
 }
 
 fn binding_name(blocks: &[BasicBlock], binding: BindingId) -> Option<&str> {
-    blocks.iter().flat_map(|block| &block.instructions).find_map(|instruction| {
-        (defined_binding(instruction) == Some(binding)).then(|| defined_name(instruction)).flatten()
-    })
+    blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find_map(|instruction| {
+            (defined_binding(instruction) == Some(binding))
+                .then(|| defined_name(instruction))
+                .flatten()
+        })
 }
 
 fn lower_type_name(type_name: &lyra_ast::TypeName) -> Type {
