@@ -115,6 +115,7 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValueDefinition {
     pub id: ValueId,
+    pub ty: Type,
     pub instruction_index: usize,
     pub uses: Vec<ValueId>,
 }
@@ -122,6 +123,7 @@ pub struct ValueDefinition {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhiNode {
     pub id: ValueId,
+    pub ty: Type,
     pub binding: BindingId,
     pub name: String,
     pub incoming: Vec<(BlockId, ValueId)>,
@@ -264,18 +266,21 @@ pub enum Instruction {
     Bind {
         name: String,
         binding: BindingId,
+        ty: Type,
         value: Value,
         span: Span,
     },
     BindMutable {
         name: String,
         binding: BindingId,
+        ty: Type,
         value: Value,
         span: Span,
     },
     Assign {
         name: String,
         binding: BindingId,
+        ty: Type,
         value: Value,
         span: Span,
     },
@@ -370,33 +375,51 @@ impl Value {
 
 #[must_use]
 pub fn lower(module: &lyra_ast::Module) -> Module {
+    let function_returns = module
+        .items
+        .iter()
+        .map(|item| match item {
+            lyra_ast::Item::Function(function) => (
+                function.name.clone(),
+                function
+                    .return_type
+                    .as_ref()
+                    .map_or(Type::Integer, lower_type_name),
+            ),
+        })
+        .collect::<HashMap<_, _>>();
+
     Module {
         functions: module
             .items
             .iter()
             .map(|item| match item {
-                lyra_ast::Item::Function(function) => lower_function(function),
+                lyra_ast::Item::Function(function) => lower_function(function, &function_returns),
             })
             .collect(),
     }
 }
 
-fn lower_function(function: &lyra_ast::Function) -> Function {
-    let mut lowerer = Lowerer::default();
+fn lower_function(
+    function: &lyra_ast::Function,
+    function_returns: &HashMap<String, Type>,
+) -> Function {
+    let mut lowerer = Lowerer::new(function_returns);
     lowerer.push_scope();
 
     let parameters = function
         .parameters
         .iter()
         .map(|parameter| {
-            let binding = lowerer.declare(&parameter.name);
+            let ty = parameter
+                .type_name
+                .as_ref()
+                .map_or(Type::Integer, lower_type_name);
+            let binding = lowerer.declare(&parameter.name, ty);
             Parameter {
                 name: parameter.name.clone(),
                 binding,
-                ty: parameter
-                    .type_name
-                    .as_ref()
-                    .map_or(Type::Integer, lower_type_name),
+                ty,
                 span: parameter.span,
             }
         })
@@ -417,13 +440,21 @@ fn lower_function(function: &lyra_ast::Function) -> Function {
     }
 }
 
-#[derive(Default)]
-struct Lowerer {
+struct Lowerer<'a> {
     next_binding: usize,
-    scopes: Vec<HashMap<String, BindingId>>,
+    scopes: Vec<HashMap<String, (BindingId, Type)>>,
+    function_returns: &'a HashMap<String, Type>,
 }
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
+    fn new(function_returns: &'a HashMap<String, Type>) -> Self {
+        Self {
+            next_binding: 0,
+            scopes: Vec::new(),
+            function_returns,
+        }
+    }
+
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -432,17 +463,25 @@ impl Lowerer {
         self.scopes.pop().expect("lowering scope must exist");
     }
 
-    fn declare(&mut self, name: &str) -> BindingId {
+    fn declare(&mut self, name: &str, ty: Type) -> BindingId {
         let binding = BindingId(self.next_binding);
         self.next_binding += 1;
         self.scopes
             .last_mut()
             .expect("lowering scope must exist")
-            .insert(name.to_owned(), binding);
+            .insert(name.to_owned(), (binding, ty));
         binding
     }
 
     fn resolve(&self, name: &str) -> BindingId {
+        self.resolve_binding(name).0
+    }
+
+    fn resolve_type(&self, name: &str) -> Type {
+        self.resolve_binding(name).1
+    }
+
+    fn resolve_binding(&self, name: &str) -> (BindingId, Type) {
         self.scopes
             .iter()
             .rev()
@@ -468,21 +507,25 @@ impl Lowerer {
     fn lower_statement(&mut self, statement: &lyra_ast::Statement) -> Instruction {
         match statement {
             lyra_ast::Statement::Let { name, value, span } => {
+                let ty = self.expression_type(value);
                 let value = self.lower_expression(value);
-                let binding = self.declare(name);
+                let binding = self.declare(name, ty);
                 Instruction::Bind {
                     name: name.clone(),
                     binding,
+                    ty,
                     value,
                     span: *span,
                 }
             }
             lyra_ast::Statement::Var { name, value, span } => {
+                let ty = self.expression_type(value);
                 let value = self.lower_expression(value);
-                let binding = self.declare(name);
+                let binding = self.declare(name, ty);
                 Instruction::BindMutable {
                     name: name.clone(),
                     binding,
+                    ty,
                     value,
                     span: *span,
                 }
@@ -490,6 +533,7 @@ impl Lowerer {
             lyra_ast::Statement::Assign { name, value, span } => Instruction::Assign {
                 name: name.clone(),
                 binding: self.resolve(name),
+                ty: self.resolve_type(name),
                 value: self.lower_expression(value),
                 span: *span,
             },
@@ -531,6 +575,54 @@ impl Lowerer {
             lyra_ast::Statement::Expression { expression, span } => Instruction::Evaluate {
                 value: self.lower_expression(expression),
                 span: *span,
+            },
+        }
+    }
+
+    fn expression_type(&self, expression: &lyra_ast::Expression) -> Type {
+        match expression {
+            lyra_ast::Expression::Integer(..) => Type::Integer,
+            lyra_ast::Expression::Float(..) => Type::Float,
+            lyra_ast::Expression::String(..) => Type::String,
+            lyra_ast::Expression::Boolean(..) => Type::Boolean,
+            lyra_ast::Expression::Identifier(name, _) => self.resolve_type(name),
+            lyra_ast::Expression::Call { callee, .. } => *self
+                .function_returns
+                .get(callee)
+                .expect("semantic analysis guarantees resolved function calls"),
+            lyra_ast::Expression::Unary {
+                operator, operand, ..
+            } => match operator {
+                lyra_ast::UnaryOperator::Negate => self.expression_type(operand),
+                lyra_ast::UnaryOperator::Not => Type::Boolean,
+            },
+            lyra_ast::Expression::Binary {
+                left,
+                operator,
+                right,
+                ..
+            } => match operator {
+                lyra_ast::BinaryOperator::Add
+                | lyra_ast::BinaryOperator::Subtract
+                | lyra_ast::BinaryOperator::Multiply
+                | lyra_ast::BinaryOperator::Divide
+                | lyra_ast::BinaryOperator::Remainder => {
+                    if self.expression_type(left) == Type::Float
+                        || self.expression_type(right) == Type::Float
+                    {
+                        Type::Float
+                    } else {
+                        Type::Integer
+                    }
+                }
+                lyra_ast::BinaryOperator::Equal
+                | lyra_ast::BinaryOperator::NotEqual
+                | lyra_ast::BinaryOperator::Less
+                | lyra_ast::BinaryOperator::LessEqual
+                | lyra_ast::BinaryOperator::Greater
+                | lyra_ast::BinaryOperator::GreaterEqual
+                | lyra_ast::BinaryOperator::And
+                | lyra_ast::BinaryOperator::Or => Type::Boolean,
             },
         }
     }
@@ -705,6 +797,8 @@ impl CfgBuilder {
                         let phi_name = binding_name(&self.blocks, name)
                             .unwrap_or("<binding>")
                             .to_owned();
+                        let ty = binding_type(&self.blocks, name)
+                            .expect("SSA phi binding must have a definition type");
                         let block = &mut self.blocks[block_index];
                         if let Some(phi) =
                             block.phi_nodes.iter_mut().find(|phi| phi.binding == name)
@@ -716,6 +810,7 @@ impl CfgBuilder {
                         } else {
                             block.phi_nodes.push(PhiNode {
                                 id: phi_id,
+                                ty,
                                 binding: name,
                                 name: phi_name,
                                 incoming: phi_incoming,
@@ -914,8 +1009,11 @@ impl CfgBuilder {
                     if defined_binding(other).is_some() {
                         let id = ValueId(self.next_value);
                         self.next_value += 1;
+                        let ty =
+                            defined_type(other).expect("SSA definition must have a binding type");
                         self.blocks[current.0].definitions.push(ValueDefinition {
                             id,
+                            ty,
                             instruction_index,
                             uses: Vec::new(),
                         });
@@ -980,6 +1078,18 @@ fn terminator_targets(terminator: &Terminator) -> Vec<BlockId> {
     }
 }
 
+fn defined_type(instruction: &Instruction) -> Option<Type> {
+    match instruction {
+        Instruction::Bind { ty, .. }
+        | Instruction::BindMutable { ty, .. }
+        | Instruction::Assign { ty, .. } => Some(*ty),
+        Instruction::Evaluate { .. }
+        | Instruction::Return { .. }
+        | Instruction::If { .. }
+        | Instruction::While { .. } => None,
+    }
+}
+
 fn defined_binding(instruction: &Instruction) -> Option<BindingId> {
     match instruction {
         Instruction::Bind { binding, .. }
@@ -1002,6 +1112,17 @@ fn defined_name(instruction: &Instruction) -> Option<&str> {
         | Instruction::If { .. }
         | Instruction::While { .. } => None,
     }
+}
+
+fn binding_type(blocks: &[BasicBlock], binding: BindingId) -> Option<Type> {
+    blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find_map(|instruction| {
+            (defined_binding(instruction) == Some(binding))
+                .then(|| defined_type(instruction))
+                .flatten()
+        })
 }
 
 fn binding_name(blocks: &[BasicBlock], binding: BindingId) -> Option<&str> {
@@ -1342,9 +1463,36 @@ mod tests {
     }
 
     #[test]
+    fn cfg_preserves_definition_and_phi_types() {
+        let module = lower_source(
+            "fn choose(flag: Bool) -> Float { var value = 1.5; if flag { value = 2.5; } else { value = 3.5; } return value; }",
+        );
+        let cfg = build_cfg(&module.functions[0].body);
+
+        assert!(
+            cfg.blocks
+                .iter()
+                .flat_map(|block| &block.definitions)
+                .filter(|definition| definition.ty == Type::Float)
+                .count()
+                >= 3
+        );
+
+        let phi = cfg
+            .blocks
+            .iter()
+            .flat_map(|block| &block.phi_nodes)
+            .find(|phi| phi.name == "value")
+            .expect("float value phi");
+
+        assert_eq!(phi.ty, Type::Float);
+    }
+
+    #[test]
     fn basic_blocks_can_record_phi_nodes() {
         let phi = PhiNode {
             id: ValueId(4),
+            ty: Type::Integer,
             binding: BindingId(0),
             name: "counter".to_owned(),
             incoming: vec![(BlockId(1), ValueId(2)), (BlockId(2), ValueId(3))],
@@ -1361,6 +1509,7 @@ mod tests {
     fn basic_blocks_can_record_ssa_definitions() {
         let definition = ValueDefinition {
             id: ValueId(3),
+            ty: Type::Integer,
             instruction_index: 1,
             uses: vec![ValueId(1), ValueId(2)],
         };
