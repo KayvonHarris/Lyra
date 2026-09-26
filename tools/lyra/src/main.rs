@@ -93,9 +93,16 @@ fn build_native(path: &str, output: &Path) -> ExitCode {
         .arg(output)
         .status();
 
+    let cleanup = fs::remove_file(&llvm_path);
+    if let Err(error) = cleanup {
+        eprintln!(
+            "lyra: could not remove temporary LLVM file {}: {error}",
+            llvm_path.display()
+        );
+    }
+
     match status {
         Ok(status) if status.success() => {
-            let _ = fs::remove_file(&llvm_path);
             println!("Built {}", output.display());
             ExitCode::SUCCESS
         }
