@@ -684,19 +684,21 @@ impl<'a> Lowerer<'a> {
                     )
                 {
                     if left_type == Type::Integer {
+                        let span = left.span();
                         left = Value::Convert {
                             value: Box::new(left),
                             from: Type::Integer,
                             to: Type::Float,
-                            span: left.span(),
+                            span,
                         };
                     }
                     if right_type == Type::Integer {
+                        let span = right.span();
                         right = Value::Convert {
                             value: Box::new(right),
                             from: Type::Integer,
                             to: Type::Float,
-                            span: right.span(),
+                            span,
                         };
                     }
                 }
