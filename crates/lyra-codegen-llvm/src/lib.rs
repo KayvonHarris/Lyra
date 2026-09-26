@@ -657,9 +657,17 @@ mod tests {
                     body: Block {
                         instructions: vec![Instruction::Return {
                             value: Some(Value::Binary {
-                                left: Box::new(Value::Local { name: "a".into(), binding: BindingId(0), span }),
+                                left: Box::new(Value::Local {
+                                    name: "a".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                 operator: BinaryOperator::Add,
-                                right: Box::new(Value::Local { name: "b".into(), binding: BindingId(1), span }),
+                                right: Box::new(Value::Local {
+                                    name: "b".into(),
+                                    binding: BindingId(1),
+                                    span,
+                                }),
                                 span,
                             }),
                             span,
@@ -788,7 +796,11 @@ mod tests {
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -798,7 +810,11 @@ mod tests {
                                     name: "counter".into(),
                                     binding: BindingId(0),
                                     value: Value::Binary {
-                                        left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                        left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                         operator: BinaryOperator::Add,
                                         right: Box::new(Value::Integer(1, span)),
                                         span,
@@ -809,7 +825,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                            value: Some(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                             span,
                         },
                     ],
@@ -854,7 +874,11 @@ mod tests {
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -865,9 +889,17 @@ mod tests {
                                         name: "total".into(),
                                         binding: BindingId(1),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local { name: "total".into(), binding: BindingId(1), span }),
+                                            left: Box::new(Value::Local {
+                                    name: "total".into(),
+                                    binding: BindingId(1),
+                                    span,
+                                }),
                                             operator: BinaryOperator::Add,
-                                            right: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                            right: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                             span,
                                         },
                                         span,
@@ -876,7 +908,11 @@ mod tests {
                                         name: "counter".into(),
                                         binding: BindingId(0),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                            left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                             operator: BinaryOperator::Add,
                                             right: Box::new(Value::Integer(1, span)),
                                             span,
@@ -888,7 +924,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "total".into(), binding: BindingId(1), span }),
+                            value: Some(Value::Local {
+                                    name: "total".into(),
+                                    binding: BindingId(1),
+                                    span,
+                                }),
                             span,
                         },
                     ],
@@ -953,7 +993,11 @@ mod tests {
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -962,7 +1006,11 @@ mod tests {
                                 instructions: vec![
                                     Instruction::If {
                                         condition: Value::Binary {
-                                            left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                            left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                             operator: BinaryOperator::Equal,
                                             right: Box::new(Value::Integer(1, span)),
                                             span,
@@ -973,7 +1021,7 @@ mod tests {
                                                 binding: BindingId(1),
                                                 value: Value::Binary {
                                                     left: Box::new(Value::Local {
-                                                        name: "total".into(),
+                                    name: "total".into(),
                                                         binding: BindingId(1),
                                                         span,
                                                     }),
@@ -990,7 +1038,7 @@ mod tests {
                                                 binding: BindingId(1),
                                                 value: Value::Binary {
                                                     left: Box::new(Value::Local {
-                                                        name: "total".into(),
+                                    name: "total".into(),
                                                         binding: BindingId(1),
                                                         span,
                                                     }),
@@ -1007,7 +1055,11 @@ mod tests {
                                         name: "counter".into(),
                                         binding: BindingId(0),
                                         value: Value::Binary {
-                                            left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                            left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                             operator: BinaryOperator::Add,
                                             right: Box::new(Value::Integer(1, span)),
                                             span,
@@ -1019,7 +1071,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "total".into(), binding: BindingId(1), span }),
+                            value: Some(Value::Local {
+                                    name: "total".into(),
+                                    binding: BindingId(1),
+                                    span,
+                                }),
                             span,
                         },
                     ],
@@ -1082,7 +1138,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "value".into(), binding: BindingId(0), span }),
+                            value: Some(Value::Local {
+                                    name: "value".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                             span,
                         },
                     ],
@@ -1137,7 +1197,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "value".into(), binding: BindingId(0), span }),
+                            value: Some(Value::Local {
+                                    name: "value".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                             span,
                         },
                     ],
@@ -1173,7 +1237,11 @@ mod tests {
                         },
                         Instruction::While {
                             condition: Value::Binary {
-                                left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                 operator: BinaryOperator::Less,
                                 right: Box::new(Value::Integer(3, span)),
                                 span,
@@ -1183,7 +1251,11 @@ mod tests {
                                     name: "counter".into(),
                                     binding: BindingId(0),
                                     value: Value::Binary {
-                                        left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                        left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                         operator: BinaryOperator::Add,
                                         right: Box::new(Value::Integer(1, span)),
                                         span,
@@ -1194,7 +1266,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                            value: Some(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                             span,
                         },
                     ],
@@ -1236,7 +1312,11 @@ mod tests {
                             name: "counter".into(),
                             binding: BindingId(0),
                             value: Value::Binary {
-                                left: Box::new(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                                left: Box::new(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                                 operator: BinaryOperator::Add,
                                 right: Box::new(Value::Integer(1, span)),
                                 span,
@@ -1244,7 +1324,11 @@ mod tests {
                             span,
                         },
                         Instruction::Return {
-                            value: Some(Value::Local { name: "counter".into(), binding: BindingId(0), span }),
+                            value: Some(Value::Local {
+                                    name: "counter".into(),
+                                    binding: BindingId(0),
+                                    span,
+                                }),
                             span,
                         },
                     ],
