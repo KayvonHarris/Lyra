@@ -365,7 +365,9 @@ impl<'a> FunctionEmitter<'a> {
                 .map(|(_, return_type)| *return_type)
                 .ok_or_else(|| CodegenError::UnknownFunction(callee.clone())),
             Value::Convert { to, .. } => Ok(*to),
-            Value::Unary { operator, operand, .. } => match operator {
+            Value::Unary {
+                operator, operand, ..
+            } => match operator {
                 UnaryOperator::Not => Ok(Type::Boolean),
                 UnaryOperator::Negate => self.value_type(operand),
             },
@@ -471,7 +473,9 @@ impl<'a> FunctionEmitter<'a> {
                         _ => return Err(CodegenError::Unsupported("float binary operator")),
                     };
                     let comparison = self.register();
-                    body.push_str(&format!("  {comparison} = fcmp {predicate} double {left}, {right}\n"));
+                    body.push_str(&format!(
+                        "  {comparison} = fcmp {predicate} double {left}, {right}\n"
+                    ));
                     let result = self.register();
                     body.push_str(&format!("  {result} = zext i1 {comparison} to i64\n"));
                     return Ok(result);
