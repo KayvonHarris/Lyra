@@ -51,6 +51,7 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             emitter
                 .locals
                 .insert(parameter.binding, format!("%{}", parameter.name));
+            emitter.local_types.insert(parameter.binding, parameter.ty);
         }
 
         let cfg = build_cfg(&function.body);
@@ -139,6 +140,7 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 struct FunctionEmitter<'a> {
     next_register: usize,
     locals: HashMap<BindingId, String>,
+    local_types: HashMap<BindingId, Type>,
     signatures: &'a HashMap<String, (Vec<Type>, Type)>,
     ssa_locals: HashMap<BindingId, String>,
 }
@@ -148,6 +150,7 @@ impl<'a> FunctionEmitter<'a> {
         Self {
             next_register: 0,
             locals: HashMap::new(),
+            local_types: HashMap::new(),
             signatures,
             ssa_locals: HashMap::new(),
         }
@@ -223,18 +226,27 @@ impl<'a> FunctionEmitter<'a> {
                     let operand = self.materialize_ssa_definition(definition, &operand, body)?;
                     self.ssa_locals.insert(*binding, operand.clone());
                     self.locals.insert(*binding, operand);
+                    if let Some(definition) = definition {
+                        self.local_types.insert(*binding, definition.ty);
+                    }
                 }
                 Instruction::BindMutable { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body)?;
                     self.ssa_locals.insert(*binding, operand.clone());
                     self.locals.insert(*binding, operand);
+                    if let Some(definition) = definition {
+                        self.local_types.insert(*binding, definition.ty);
+                    }
                 }
                 Instruction::Assign { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
                     let operand = self.materialize_ssa_definition(definition, &operand, body)?;
                     self.ssa_locals.insert(*binding, operand.clone());
                     self.locals.insert(*binding, operand);
+                    if let Some(definition) = definition {
+                        self.local_types.insert(*binding, definition.ty);
+                    }
                 }
                 Instruction::Evaluate { value, .. } => {
                     let _ = self.emit_value(value, body)?;
@@ -336,6 +348,41 @@ impl<'a> FunctionEmitter<'a> {
         Ok(())
     }
 
+    fn value_type(&self, value: &Value) -> Result<Type, CodegenError> {
+        match value {
+            Value::Integer(_, _) => Ok(Type::Integer),
+            Value::Float(_, _) => Ok(Type::Float),
+            Value::Boolean(_, _) => Ok(Type::Boolean),
+            Value::String(_, _) => Ok(Type::String),
+            Value::Local { binding, name, .. } => self
+                .local_types
+                .get(binding)
+                .copied()
+                .ok_or_else(|| CodegenError::UnknownLocal(name.clone())),
+            Value::Call { callee, .. } => self
+                .signatures
+                .get(callee)
+                .map(|(_, return_type)| *return_type)
+                .ok_or_else(|| CodegenError::UnknownFunction(callee.clone())),
+            Value::Convert { to, .. } => Ok(*to),
+            Value::Unary { operator, operand, .. } => match operator {
+                UnaryOperator::Not => Ok(Type::Boolean),
+                UnaryOperator::Negate => self.value_type(operand),
+            },
+            Value::Binary { left, operator, .. } => match operator {
+                BinaryOperator::Equal
+                | BinaryOperator::NotEqual
+                | BinaryOperator::Less
+                | BinaryOperator::LessEqual
+                | BinaryOperator::Greater
+                | BinaryOperator::GreaterEqual
+                | BinaryOperator::And
+                | BinaryOperator::Or => Ok(Type::Boolean),
+                _ => self.value_type(left),
+            },
+        }
+    }
+
     fn emit_value(&mut self, value: &Value, body: &mut String) -> Result<String, CodegenError> {
         match value {
             Value::Integer(value, _) => Ok(value.to_string()),
@@ -379,11 +426,14 @@ impl<'a> FunctionEmitter<'a> {
             Value::Unary {
                 operator, operand, ..
             } => {
+                let operand_type = self.value_type(operand)?;
                 let operand = self.emit_value(operand, body)?;
                 let register = self.register();
-                let expression = match operator {
-                    UnaryOperator::Negate => format!("sub i64 0, {operand}"),
-                    UnaryOperator::Not => format!("xor i64 {operand}, 1"),
+                let expression = match (operator, operand_type) {
+                    (UnaryOperator::Negate, Type::Float) => format!("fneg double {operand}"),
+                    (UnaryOperator::Negate, Type::Integer) => format!("sub i64 0, {operand}"),
+                    (UnaryOperator::Not, Type::Boolean) => format!("xor i64 {operand}, 1"),
+                    _ => return Err(CodegenError::Unsupported("unary operand type")),
                 };
                 body.push_str(&format!("  {register} = {expression}\n"));
                 Ok(register)
@@ -394,8 +444,38 @@ impl<'a> FunctionEmitter<'a> {
                 right,
                 ..
             } => {
+                let operand_type = self.value_type(left)?;
                 let left = self.emit_value(left, body)?;
                 let right = self.emit_value(right, body)?;
+                if operand_type == Type::Float {
+                    let arithmetic = match operator {
+                        BinaryOperator::Add => Some("fadd"),
+                        BinaryOperator::Subtract => Some("fsub"),
+                        BinaryOperator::Multiply => Some("fmul"),
+                        BinaryOperator::Divide => Some("fdiv"),
+                        BinaryOperator::Remainder => Some("frem"),
+                        _ => None,
+                    };
+                    if let Some(opcode) = arithmetic {
+                        let register = self.register();
+                        body.push_str(&format!("  {register} = {opcode} double {left}, {right}\n"));
+                        return Ok(register);
+                    }
+                    let predicate = match operator {
+                        BinaryOperator::Equal => "oeq",
+                        BinaryOperator::NotEqual => "one",
+                        BinaryOperator::Less => "olt",
+                        BinaryOperator::LessEqual => "ole",
+                        BinaryOperator::Greater => "ogt",
+                        BinaryOperator::GreaterEqual => "oge",
+                        _ => return Err(CodegenError::Unsupported("float binary operator")),
+                    };
+                    let comparison = self.register();
+                    body.push_str(&format!("  {comparison} = fcmp {predicate} double {left}, {right}\n"));
+                    let result = self.register();
+                    body.push_str(&format!("  {result} = zext i1 {comparison} to i64\n"));
+                    return Ok(result);
+                }
                 let arithmetic = match operator {
                     BinaryOperator::Add => Some("add"),
                     BinaryOperator::Subtract => Some("sub"),
@@ -469,6 +549,45 @@ mod tests {
             binding: BindingId(binding),
             span,
         }
+    }
+
+    #[test]
+    fn emits_float_arithmetic_comparison_and_negation() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "float_math".into(),
+                parameters: vec![],
+                return_type: Type::Boolean,
+                body: Block {
+                    instructions: vec![Instruction::Return {
+                        value: Some(Value::Binary {
+                            left: Box::new(Value::Unary {
+                                operator: UnaryOperator::Negate,
+                                operand: Box::new(Value::Binary {
+                                    left: Box::new(Value::Float(1.5, span)),
+                                    operator: BinaryOperator::Add,
+                                    right: Box::new(Value::Float(2.5, span)),
+                                    span,
+                                }),
+                                span,
+                            }),
+                            operator: BinaryOperator::Less,
+                            right: Box::new(Value::Float(0.0, span)),
+                            span,
+                        }),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("Float operations should lower");
+        assert!(llvm.contains("fadd double 1.5, 2.5"));
+        assert!(llvm.contains("fneg double %"));
+        assert!(llvm.contains("fcmp olt double %"));
+        assert!(llvm.contains("zext i1 %"));
     }
 
     #[test]
