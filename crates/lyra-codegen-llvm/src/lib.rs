@@ -26,7 +26,11 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
             (
                 function.name.clone(),
                 (
-                    function.parameters.iter().map(|parameter| parameter.ty).collect(),
+                    function
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect(),
                     function.return_type,
                 ),
             )
