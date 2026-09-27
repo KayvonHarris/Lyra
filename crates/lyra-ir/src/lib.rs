@@ -1095,7 +1095,7 @@ fn collect_value_uses_from_environment(
                 collect_value_uses_from_environment(Some(argument), environment, uses);
             }
         }
-        Value::Unary { operand, .. } => {
+        Value::Unary { operand, .. } | Value::Convert { value: operand, .. } => {
             collect_value_uses_from_environment(Some(operand), environment, uses);
         }
         Value::Binary { left, right, .. } => {
