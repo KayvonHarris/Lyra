@@ -22,7 +22,15 @@ pub fn emit_llvm_ir(module: &Module) -> Result<String, CodegenError> {
     let signatures = module
         .functions
         .iter()
-        .map(|function| (function.name.clone(), function.return_type))
+        .map(|function| {
+            (
+                function.name.clone(),
+                (
+                    function.parameters.iter().map(|parameter| parameter.ty).collect(),
+                    function.return_type,
+                ),
+            )
+        })
         .collect::<HashMap<_, _>>();
     let mut output = String::from("; ModuleID = 'lyra'\nsource_filename = \"lyra\"\n\n");
 
@@ -127,12 +135,12 @@ fn default_value(ty: Type) -> Result<&'static str, CodegenError> {
 struct FunctionEmitter<'a> {
     next_register: usize,
     locals: HashMap<BindingId, String>,
-    signatures: &'a HashMap<String, Type>,
+    signatures: &'a HashMap<String, (Vec<Type>, Type)>,
     ssa_locals: HashMap<BindingId, String>,
 }
 
 impl<'a> FunctionEmitter<'a> {
-    fn new(signatures: &'a HashMap<String, Type>) -> Self {
+    fn new(signatures: &'a HashMap<String, (Vec<Type>, Type)>) -> Self {
         Self {
             next_register: 0,
             locals: HashMap::new(),
@@ -175,8 +183,9 @@ impl<'a> FunctionEmitter<'a> {
                 .collect::<Vec<_>>()
                 .join(", ");
             body.push_str(&format!(
-                "  {} = phi i64 {incoming}\n",
-                Self::ssa_register(phi.id)
+                "  {} = phi {} {incoming}\n",
+                Self::ssa_register(phi.id),
+                llvm_type(phi.ty)?
             ));
         }
         Ok(())
@@ -207,19 +216,19 @@ impl<'a> FunctionEmitter<'a> {
             match instruction {
                 Instruction::Bind { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
-                    let operand = self.materialize_ssa_definition(definition, &operand, body);
+                    let operand = self.materialize_ssa_definition(definition, &operand, body)?;
                     self.ssa_locals.insert(*binding, operand.clone());
                     self.locals.insert(*binding, operand);
                 }
                 Instruction::BindMutable { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
-                    let operand = self.materialize_ssa_definition(definition, &operand, body);
+                    let operand = self.materialize_ssa_definition(definition, &operand, body)?;
                     self.ssa_locals.insert(*binding, operand.clone());
                     self.locals.insert(*binding, operand);
                 }
                 Instruction::Assign { binding, value, .. } => {
                     let operand = self.emit_value(value, body)?;
-                    let operand = self.materialize_ssa_definition(definition, &operand, body);
+                    let operand = self.materialize_ssa_definition(definition, &operand, body)?;
                     self.ssa_locals.insert(*binding, operand.clone());
                     self.locals.insert(*binding, operand);
                 }
@@ -241,13 +250,19 @@ impl<'a> FunctionEmitter<'a> {
         definition: Option<&lyra_ir::ValueDefinition>,
         operand: &str,
         body: &mut String,
-    ) -> String {
+    ) -> Result<String, CodegenError> {
         let Some(definition) = definition else {
-            return operand.to_owned();
+            return Ok(operand.to_owned());
         };
         let register = Self::ssa_register(definition.id);
-        body.push_str(&format!("  {register} = add i64 {operand}, 0\n"));
-        register
+        match definition.ty {
+            Type::Float => body.push_str(&format!("  {register} = fadd double {operand}, 0.0\n")),
+            Type::Integer | Type::Boolean => {
+                body.push_str(&format!("  {register} = add i64 {operand}, 0\n"));
+            }
+            _ => return Err(CodegenError::Unsupported("SSA definition type")),
+        }
+        Ok(register)
     }
 
     fn emit_cfg_terminator(
@@ -334,15 +349,15 @@ impl<'a> FunctionEmitter<'a> {
             Value::Call {
                 callee, arguments, ..
             } => {
-                let return_type = self
+                let (parameter_types, return_type) = self
                     .signatures
                     .get(callee)
-                    .copied()
+                    .cloned()
                     .ok_or_else(|| CodegenError::UnknownFunction(callee.clone()))?;
                 let mut operands = Vec::with_capacity(arguments.len());
-                for argument in arguments {
+                for (argument, parameter_type) in arguments.iter().zip(parameter_types) {
                     let operand = self.emit_value(argument, body)?;
-                    operands.push(format!("i64 {operand}"));
+                    operands.push(format!("{} {operand}", llvm_type(parameter_type)?));
                 }
                 if return_type == Type::Unit {
                     body.push_str(&format!("  call void @{callee}({})\n", operands.join(", ")));
@@ -420,8 +435,19 @@ impl<'a> FunctionEmitter<'a> {
                 body.push_str(&format!("  {result} = zext i1 {comparison} to i64\n"));
                 Ok(result)
             }
-            Value::Convert { .. } => Err(CodegenError::Unsupported("numeric conversions")),
-            Value::Float(_, _) => Err(CodegenError::Unsupported("float values")),
+            Value::Convert {
+                value,
+                from: Type::Integer,
+                to: Type::Float,
+                ..
+            } => {
+                let operand = self.emit_value(value, body)?;
+                let register = self.register();
+                body.push_str(&format!("  {register} = sitofp i64 {operand} to double\n"));
+                Ok(register)
+            }
+            Value::Convert { .. } => Err(CodegenError::Unsupported("numeric conversion")),
+            Value::Float(value, _) => Ok(value.to_string()),
             Value::String(_, _) => Err(CodegenError::Unsupported("string values")),
         }
     }
@@ -439,6 +465,34 @@ mod tests {
             binding: BindingId(binding),
             span,
         }
+    }
+
+    #[test]
+    fn emits_explicit_integer_to_float_conversion() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "promote".into(),
+                parameters: vec![],
+                return_type: Type::Float,
+                body: Block {
+                    instructions: vec![Instruction::Return {
+                        value: Some(Value::Convert {
+                            value: Box::new(Value::Integer(42, span)),
+                            from: Type::Integer,
+                            to: Type::Float,
+                            span,
+                        }),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("numeric conversion should lower");
+        assert!(llvm.contains("sitofp i64 42 to double"));
+        assert!(llvm.contains("ret double %"));
     }
 
     #[test]
