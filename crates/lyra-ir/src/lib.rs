@@ -349,6 +349,12 @@ pub enum Value {
         operand: Box<Value>,
         span: Span,
     },
+    Convert {
+        value: Box<Value>,
+        from: Type,
+        to: Type,
+        span: Span,
+    },
     Binary {
         left: Box<Value>,
         operator: BinaryOperator,
@@ -368,6 +374,7 @@ impl Value {
             | Self::Local { span, .. }
             | Self::Call { span, .. }
             | Self::Unary { span, .. }
+            | Self::Convert { span, .. }
             | Self::Binary { span, .. } => *span,
         }
     }
@@ -664,12 +671,45 @@ impl<'a> Lowerer<'a> {
                 operator,
                 right,
                 span,
-            } => Value::Binary {
-                left: Box::new(self.lower_expression(left)),
-                operator: lower_binary_operator(*operator),
-                right: Box::new(self.lower_expression(right)),
-                span: *span,
-            },
+            } => {
+                let left_type = self.expression_type(left);
+                let right_type = self.expression_type(right);
+                let mut left = self.lower_expression(left);
+                let mut right = self.lower_expression(right);
+
+                if is_numeric_operator(*operator)
+                    && matches!(
+                        (left_type, right_type),
+                        (Type::Integer, Type::Float) | (Type::Float, Type::Integer)
+                    )
+                {
+                    if left_type == Type::Integer {
+                        let span = left.span();
+                        left = Value::Convert {
+                            value: Box::new(left),
+                            from: Type::Integer,
+                            to: Type::Float,
+                            span,
+                        };
+                    }
+                    if right_type == Type::Integer {
+                        let span = right.span();
+                        right = Value::Convert {
+                            value: Box::new(right),
+                            from: Type::Integer,
+                            to: Type::Float,
+                            span,
+                        };
+                    }
+                }
+
+                Value::Binary {
+                    left: Box::new(left),
+                    operator: lower_binary_operator(*operator),
+                    right: Box::new(right),
+                    span: *span,
+                }
+            }
         }
     }
 }
@@ -1055,7 +1095,7 @@ fn collect_value_uses_from_environment(
                 collect_value_uses_from_environment(Some(argument), environment, uses);
             }
         }
-        Value::Unary { operand, .. } => {
+        Value::Unary { operand, .. } | Value::Convert { value: operand, .. } => {
             collect_value_uses_from_environment(Some(operand), environment, uses);
         }
         Value::Binary { left, right, .. } => {
@@ -1152,6 +1192,23 @@ fn lower_unary_operator(operator: lyra_ast::UnaryOperator) -> UnaryOperator {
         lyra_ast::UnaryOperator::Negate => UnaryOperator::Negate,
         lyra_ast::UnaryOperator::Not => UnaryOperator::Not,
     }
+}
+
+fn is_numeric_operator(operator: lyra_ast::BinaryOperator) -> bool {
+    matches!(
+        operator,
+        lyra_ast::BinaryOperator::Add
+            | lyra_ast::BinaryOperator::Subtract
+            | lyra_ast::BinaryOperator::Multiply
+            | lyra_ast::BinaryOperator::Divide
+            | lyra_ast::BinaryOperator::Remainder
+            | lyra_ast::BinaryOperator::Equal
+            | lyra_ast::BinaryOperator::NotEqual
+            | lyra_ast::BinaryOperator::Less
+            | lyra_ast::BinaryOperator::LessEqual
+            | lyra_ast::BinaryOperator::Greater
+            | lyra_ast::BinaryOperator::GreaterEqual
+    )
 }
 
 fn lower_binary_operator(operator: lyra_ast::BinaryOperator) -> BinaryOperator {
@@ -1884,6 +1941,29 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn inserts_explicit_integer_to_float_conversion_for_mixed_numeric_binary() {
+        let module = lower_source("fn compare(value: Float) -> Bool { return 1 < value; }");
+        let Instruction::Return {
+            value: Some(Value::Binary { left, right, .. }),
+            ..
+        } = &module.functions[0].body.instructions[0]
+        else {
+            panic!("expected binary return value");
+        };
+
+        assert!(matches!(
+            left.as_ref(),
+            Value::Convert {
+                value,
+                from: Type::Integer,
+                to: Type::Float,
+                ..
+            } if matches!(value.as_ref(), Value::Integer(1, _))
+        ));
+        assert!(matches!(right.as_ref(), Value::Local { .. }));
     }
 
     #[test]
