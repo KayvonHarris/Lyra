@@ -535,7 +535,14 @@ impl<'a> FunctionEmitter<'a> {
                 Ok(register)
             }
             Value::Convert { .. } => Err(CodegenError::Unsupported("numeric conversion")),
-            Value::Float(value, _) => Ok(value.to_string()),
+            Value::Float(value, _) => {
+                let literal = value.to_string();
+                if literal.contains(['.', 'e', 'E']) {
+                    Ok(literal)
+                } else {
+                    Ok(format!("{literal}.0"))
+                }
+            }
             Value::String(_, _) => Err(CodegenError::Unsupported("string values")),
         }
     }
@@ -553,6 +560,28 @@ mod tests {
             binding: BindingId(binding),
             span,
         }
+    }
+
+    #[test]
+    fn emits_integral_float_literals_with_decimal_syntax() {
+        let span = Span { start: 0, end: 0 };
+        let module = Module {
+            functions: vec![Function {
+                name: "threshold".into(),
+                parameters: vec![],
+                return_type: Type::Float,
+                body: Block {
+                    instructions: vec![Instruction::Return {
+                        value: Some(Value::Float(42.0, span)),
+                        span,
+                    }],
+                },
+                span,
+            }],
+        };
+
+        let llvm = emit_llvm_ir(&module).expect("integral Float literal should lower");
+        assert!(llvm.contains("ret double 42.0"));
     }
 
     #[test]
