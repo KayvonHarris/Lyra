@@ -611,6 +611,21 @@ mod tests {
     }
 
     #[test]
+    fn exposes_validated_function_signatures() {
+        let analysis = analyze_source(
+            "fn add(value: Float, delta: Int) -> Float { return value + delta; }",
+        );
+        assert!(analysis.diagnostics.is_empty());
+        assert_eq!(
+            analysis.function_signatures.get("add"),
+            Some(&FunctionSignature {
+                parameters: vec![Type::Float, Type::Integer],
+                return_type: Type::Float,
+            })
+        );
+    }
+
+    #[test]
     fn accepts_well_typed_program() {
         let analysis =
             analyze_source("fn is_fast() -> Bool { let speed = 65.0; return speed >= 60; }");
