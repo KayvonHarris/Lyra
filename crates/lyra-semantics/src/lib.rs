@@ -20,6 +20,7 @@ pub enum Type {
 #[derive(Debug, Default)]
 pub struct Analysis {
     pub diagnostics: Vec<Diagnostic>,
+    pub function_signatures: HashMap<String, FunctionSignature>,
 }
 
 #[must_use]
@@ -27,10 +28,10 @@ pub fn analyze(module: &Module) -> Analysis {
     Analyzer::default().analyze(module)
 }
 
-#[derive(Debug, Clone)]
-struct FunctionSignature {
-    parameters: Vec<Type>,
-    return_type: Type,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSignature {
+    pub parameters: Vec<Type>,
+    pub return_type: Type,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -170,6 +171,7 @@ impl Analyzer {
 
         Analysis {
             diagnostics: self.diagnostics,
+            function_signatures: self.functions,
         }
     }
 
