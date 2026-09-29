@@ -542,7 +542,7 @@ impl<'a> FunctionEmitter<'a> {
                 } else {
                     Ok(format!("{literal}.0"))
                 }
-            },
+            }
             Value::String(_, _) => Err(CodegenError::Unsupported("string values")),
         }
     }
