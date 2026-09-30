@@ -50,7 +50,12 @@ pub fn compile(source: &str) -> CompileOutput {
                 (
                     name.clone(),
                     (
-                        signature.parameters.iter().copied().map(convert_type).collect(),
+                        signature
+                            .parameters
+                            .iter()
+                            .copied()
+                            .map(convert_type)
+                            .collect(),
                         convert_type(signature.return_type),
                     ),
                 )
