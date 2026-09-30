@@ -380,7 +380,6 @@ impl Value {
     }
 }
 
-#[must_use]
 /// Lower an already validated AST using function return types owned by semantic analysis.
 /// All referenced function signatures must be present in the supplied map.
 #[must_use]
