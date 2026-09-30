@@ -398,6 +398,34 @@ pub fn lower_with_function_returns(
     }
 }
 
+/// Lower validated functions using semantic-owned parameter and return types.
+#[must_use]
+pub fn lower_with_signatures(
+    module: &lyra_ast::Module,
+    signatures: &HashMap<String, (Vec<Type>, Type)>,
+) -> Module {
+    let returns = signatures
+        .iter()
+        .map(|(name, (_, result))| (name.clone(), *result))
+        .collect::<HashMap<_, _>>();
+    let mut lowered = lower_with_function_returns(module, &returns);
+    for function in &mut lowered.functions {
+        let (parameters, result) = signatures
+            .get(&function.name)
+            .expect("validated functions must have semantic signatures");
+        assert_eq!(
+            parameters.len(),
+            function.parameters.len(),
+            "semantic parameter count must match validated AST"
+        );
+        for (parameter, ty) in function.parameters.iter_mut().zip(parameters) {
+            parameter.ty = *ty;
+        }
+        function.return_type = *result;
+    }
+    lowered
+}
+
 pub fn lower(module: &lyra_ast::Module) -> Module {
     let function_returns = module
         .items
