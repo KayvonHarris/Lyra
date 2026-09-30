@@ -1,5 +1,7 @@
 //! Compiler pipeline orchestration.
 
+use std::collections::HashMap;
+
 use lyra_ast::Module;
 use lyra_diagnostics::{Diagnostic, Severity};
 
@@ -30,12 +32,32 @@ pub fn compile(source: &str) -> CompileOutput {
     let mut diagnostics = lexed.diagnostics;
     diagnostics.extend(parser_diagnostics);
 
+    let mut function_returns = HashMap::new();
     if !has_errors(&diagnostics) {
-        diagnostics.extend(lyra_semantics::analyze(&module).diagnostics);
+        let analysis = lyra_semantics::analyze(&module);
+        function_returns = analysis
+            .function_signatures
+            .iter()
+            .map(|(name, signature)| {
+                let ty = match signature.return_type {
+                    lyra_semantics::Type::Integer => lyra_ir::Type::Integer,
+                    lyra_semantics::Type::Float => lyra_ir::Type::Float,
+                    lyra_semantics::Type::String => lyra_ir::Type::String,
+                    lyra_semantics::Type::Boolean => lyra_ir::Type::Boolean,
+                    lyra_semantics::Type::Unit => lyra_ir::Type::Unit,
+                    lyra_semantics::Type::Unknown => lyra_ir::Type::Unknown,
+                };
+                (name.clone(), ty)
+            })
+            .collect();
+        diagnostics.extend(analysis.diagnostics);
     }
 
     let ir = if !has_errors(&diagnostics) {
-        Some(lyra_ir::lower(&module))
+        Some(lyra_ir::lower_with_function_returns(
+            &module,
+            &function_returns,
+        ))
     } else {
         None
     };
