@@ -32,14 +32,14 @@ pub fn compile(source: &str) -> CompileOutput {
     let mut diagnostics = lexed.diagnostics;
     diagnostics.extend(parser_diagnostics);
 
-    let mut function_returns = HashMap::new();
+    let mut function_signatures = HashMap::new();
     if !has_errors(&diagnostics) {
         let analysis = lyra_semantics::analyze(&module);
-        function_returns = analysis
+        function_signatures = analysis
             .function_signatures
             .iter()
             .map(|(name, signature)| {
-                let ty = match signature.return_type {
+                let convert_type = |ty| match ty {
                     lyra_semantics::Type::Integer => lyra_ir::Type::Integer,
                     lyra_semantics::Type::Float => lyra_ir::Type::Float,
                     lyra_semantics::Type::String => lyra_ir::Type::String,
@@ -47,16 +47,22 @@ pub fn compile(source: &str) -> CompileOutput {
                     lyra_semantics::Type::Unit => lyra_ir::Type::Unit,
                     lyra_semantics::Type::Unknown => lyra_ir::Type::Unknown,
                 };
-                (name.clone(), ty)
+                (
+                    name.clone(),
+                    (
+                        signature.parameters.iter().copied().map(convert_type).collect(),
+                        convert_type(signature.return_type),
+                    ),
+                )
             })
             .collect();
         diagnostics.extend(analysis.diagnostics);
     }
 
     let ir = if !has_errors(&diagnostics) {
-        Some(lyra_ir::lower_with_function_returns(
+        Some(lyra_ir::lower_with_signatures(
             &module,
-            &function_returns,
+            &function_signatures,
         ))
     } else {
         None
