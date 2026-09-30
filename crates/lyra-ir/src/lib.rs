@@ -381,6 +381,24 @@ impl Value {
 }
 
 #[must_use]
+/// Lower an already validated AST using function return types owned by semantic analysis.
+/// All referenced function signatures must be present in the supplied map.
+#[must_use]
+pub fn lower_with_function_returns(
+    module: &lyra_ast::Module,
+    function_returns: &HashMap<String, Type>,
+) -> Module {
+    Module {
+        functions: module
+            .items
+            .iter()
+            .map(|item| match item {
+                lyra_ast::Item::Function(function) => lower_function(function, function_returns),
+            })
+            .collect(),
+    }
+}
+
 pub fn lower(module: &lyra_ast::Module) -> Module {
     let function_returns = module
         .items
@@ -396,15 +414,7 @@ pub fn lower(module: &lyra_ast::Module) -> Module {
         })
         .collect::<HashMap<_, _>>();
 
-    Module {
-        functions: module
-            .items
-            .iter()
-            .map(|item| match item {
-                lyra_ast::Item::Function(function) => lower_function(function, &function_returns),
-            })
-            .collect(),
-    }
+    lower_with_function_returns(module, &function_returns)
 }
 
 fn lower_function(
