@@ -21,6 +21,8 @@ pub enum Type {
 pub struct Analysis {
     pub diagnostics: Vec<Diagnostic>,
     pub function_signatures: HashMap<String, FunctionSignature>,
+    /// Expression identities are valid only while lowering the same borrowed AST.
+    pub expression_types: HashMap<usize, Type>,
 }
 
 #[must_use]
@@ -46,6 +48,7 @@ struct Analyzer {
     scopes: Vec<HashMap<String, Binding>>,
     functions: HashMap<String, FunctionSignature>,
     current_return_type: Type,
+    expression_types: HashMap<usize, Type>,
 }
 
 impl Analyzer {
@@ -172,6 +175,7 @@ impl Analyzer {
         Analysis {
             diagnostics: self.diagnostics,
             function_signatures: self.functions,
+            expression_types: self.expression_types,
         }
     }
 
@@ -382,7 +386,7 @@ impl Analyzer {
     }
 
     fn check_expression(&mut self, expression: &Expression) -> Type {
-        match expression {
+        let ty = match expression {
             Expression::Integer(_, _) => Type::Integer,
             Expression::Float(_, _) => Type::Float,
             Expression::String(_, _) => Type::String,
@@ -467,7 +471,9 @@ impl Analyzer {
                 let right_type = self.reject_unit_operand(right_type, right.span());
                 self.check_binary(left_type, *operator, right_type, *span)
             }
-        }
+        };
+        self.expression_types.insert(expression as *const Expression as usize, ty);
+        ty
     }
 
     fn reject_unit_operand(&mut self, ty: Type, span: Span) -> Type {
