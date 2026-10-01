@@ -618,6 +618,49 @@ mod tests {
     }
 
     #[test]
+    fn records_distinct_nested_expression_types_from_validated_ast() {
+        let source = "fn compute(value: Float) -> Float { return (value + 2) * 3.5; }";
+        let lexed = lyra_lexer::tokenize(source);
+        assert!(lexed.diagnostics.is_empty());
+        let (module, parser_diagnostics) = lyra_parser::parse(&lexed.tokens);
+        assert!(parser_diagnostics.is_empty());
+        let analysis = analyze(&module);
+        assert!(analysis.diagnostics.is_empty());
+
+        let Item::Function(function) = &module.items[0];
+        let Statement::Return {
+            value: Some(expression),
+            ..
+        } = &function.body.statements[0]
+        else {
+            panic!("expected a return expression");
+        };
+        let Expression::Binary { left, right, .. } = expression else {
+            panic!("expected outer multiplication");
+        };
+        let Expression::Binary {
+            left: inner_left,
+            right: inner_right,
+            ..
+        } = left.as_ref()
+        else {
+            panic!("expected nested addition");
+        };
+        let type_of = |expression: &Expression| {
+            analysis
+                .expression_types
+                .get(&(expression as *const Expression as usize))
+                .copied()
+        };
+        assert_eq!(type_of(expression), Some(Type::Float));
+        assert_eq!(type_of(left), Some(Type::Float));
+        assert_eq!(type_of(right), Some(Type::Float));
+        assert_eq!(type_of(inner_left), Some(Type::Float));
+        assert_eq!(type_of(inner_right), Some(Type::Integer));
+        assert_eq!(analysis.expression_types.len(), 5);
+    }
+
+    #[test]
     fn exposes_validated_function_signatures() {
         let analysis =
             analyze_source("fn add(value: Float, delta: Int) -> Float { return value + delta; }");
