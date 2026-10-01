@@ -482,7 +482,12 @@ fn lower_function_typed(
         .enumerate()
         .map(|(index, parameter)| {
             let ty = parameter_types.map_or_else(
-                || parameter.type_name.as_ref().map_or(Type::Integer, lower_type_name),
+                || {
+                    parameter
+                        .type_name
+                        .as_ref()
+                        .map_or(Type::Integer, lower_type_name)
+                },
                 |types| types[index],
             );
             let binding = lowerer.declare(&parameter.name, ty);
