@@ -23,6 +23,8 @@ pub struct Analysis {
     pub function_signatures: HashMap<String, FunctionSignature>,
     /// Expression identities are valid only while lowering the same borrowed AST.
     pub expression_types: HashMap<usize, Type>,
+    /// Validated mixed-numeric binary operands requiring Int-to-Float conversion.
+    pub numeric_conversions: HashMap<usize, (bool, bool)>,
 }
 
 #[must_use]
@@ -49,6 +51,7 @@ struct Analyzer {
     functions: HashMap<String, FunctionSignature>,
     current_return_type: Type,
     expression_types: HashMap<usize, Type>,
+    numeric_conversions: HashMap<usize, (bool, bool)>,
 }
 
 impl Analyzer {
@@ -176,6 +179,7 @@ impl Analyzer {
             diagnostics: self.diagnostics,
             function_signatures: self.functions,
             expression_types: self.expression_types,
+            numeric_conversions: self.numeric_conversions,
         }
     }
 
@@ -469,7 +473,33 @@ impl Analyzer {
                 let right_type = self.check_expression(right);
                 let left_type = self.reject_unit_operand(left_type, left.span());
                 let right_type = self.reject_unit_operand(right_type, right.span());
-                self.check_binary(left_type, *operator, right_type, *span)
+                let result = self.check_binary(left_type, *operator, right_type, *span);
+                if result != Type::Unknown
+                    && matches!(
+                        operator,
+                        BinaryOperator::Add
+                            | BinaryOperator::Subtract
+                            | BinaryOperator::Multiply
+                            | BinaryOperator::Divide
+                            | BinaryOperator::Remainder
+                            | BinaryOperator::Less
+                            | BinaryOperator::LessEqual
+                            | BinaryOperator::Greater
+                            | BinaryOperator::GreaterEqual
+                            | BinaryOperator::Equal
+                            | BinaryOperator::NotEqual
+                    )
+                    && matches!(
+                        (left_type, right_type),
+                        (Type::Integer, Type::Float) | (Type::Float, Type::Integer)
+                    )
+                {
+                    self.numeric_conversions.insert(
+                        expression as *const Expression as usize,
+                        (left_type == Type::Integer, right_type == Type::Integer),
+                    );
+                }
+                result
             }
         };
         self.expression_types
