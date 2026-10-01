@@ -472,7 +472,8 @@ impl Analyzer {
                 self.check_binary(left_type, *operator, right_type, *span)
             }
         };
-        self.expression_types.insert(expression as *const Expression as usize, ty);
+        self.expression_types
+            .insert(expression as *const Expression as usize, ty);
         ty
     }
 
