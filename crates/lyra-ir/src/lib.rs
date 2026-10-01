@@ -404,26 +404,41 @@ pub fn lower_with_signatures(
     module: &lyra_ast::Module,
     signatures: &HashMap<String, (Vec<Type>, Type)>,
 ) -> Module {
+    lower_with_typed_signatures(module, signatures, None)
+}
+
+/// Consume semantic expression types for the exact AST that was validated.
+/// Expression identities are addresses within that borrowed AST, not source spans.
+#[must_use]
+pub fn lower_with_typed_signatures(
+    module: &lyra_ast::Module,
+    signatures: &HashMap<String, (Vec<Type>, Type)>,
+    expression_types: Option<&HashMap<usize, Type>>,
+) -> Module {
     let returns = signatures
         .iter()
         .map(|(name, (_, result))| (name.clone(), *result))
         .collect::<HashMap<_, _>>();
-    let mut lowered = lower_with_function_returns(module, &returns);
-    for function in &mut lowered.functions {
-        let (parameters, result) = signatures
-            .get(&function.name)
-            .expect("validated functions must have semantic signatures");
-        assert_eq!(
-            parameters.len(),
-            function.parameters.len(),
-            "semantic parameter count must match validated AST"
-        );
-        for (parameter, ty) in function.parameters.iter_mut().zip(parameters) {
-            parameter.ty = *ty;
-        }
-        function.return_type = *result;
+    Module {
+        functions: module
+            .items
+            .iter()
+            .map(|item| match item {
+                lyra_ast::Item::Function(function) => {
+                    let (parameters, result) = signatures
+                        .get(&function.name)
+                        .expect("validated functions must have semantic signatures");
+                    lower_function_typed(
+                        function,
+                        &returns,
+                        Some(parameters),
+                        Some(*result),
+                        expression_types,
+                    )
+                }
+            })
+            .collect(),
     }
-    lowered
 }
 
 pub fn lower(module: &lyra_ast::Module) -> Module {
@@ -448,17 +463,28 @@ fn lower_function(
     function: &lyra_ast::Function,
     function_returns: &HashMap<String, Type>,
 ) -> Function {
-    let mut lowerer = Lowerer::new(function_returns);
+    lower_function_typed(function, function_returns, None, None, None)
+}
+
+fn lower_function_typed(
+    function: &lyra_ast::Function,
+    function_returns: &HashMap<String, Type>,
+    parameter_types: Option<&[Type]>,
+    return_type: Option<Type>,
+    expression_types: Option<&HashMap<usize, Type>>,
+) -> Function {
+    let mut lowerer = Lowerer::new(function_returns, expression_types);
     lowerer.push_scope();
 
     let parameters = function
         .parameters
         .iter()
-        .map(|parameter| {
-            let ty = parameter
-                .type_name
-                .as_ref()
-                .map_or(Type::Integer, lower_type_name);
+        .enumerate()
+        .map(|(index, parameter)| {
+            let ty = parameter_types.map_or_else(
+                || parameter.type_name.as_ref().map_or(Type::Integer, lower_type_name),
+                |types| types[index],
+            );
             let binding = lowerer.declare(&parameter.name, ty);
             Parameter {
                 name: parameter.name.clone(),
@@ -475,10 +501,12 @@ fn lower_function(
     Function {
         name: function.name.clone(),
         parameters,
-        return_type: function
-            .return_type
-            .as_ref()
-            .map_or(Type::Integer, lower_type_name),
+        return_type: return_type.unwrap_or_else(|| {
+            function
+                .return_type
+                .as_ref()
+                .map_or(Type::Integer, lower_type_name)
+        }),
         body,
         span: function.span,
     }
@@ -488,14 +516,19 @@ struct Lowerer<'a> {
     next_binding: usize,
     scopes: Vec<HashMap<String, (BindingId, Type)>>,
     function_returns: &'a HashMap<String, Type>,
+    expression_types: Option<&'a HashMap<usize, Type>>,
 }
 
 impl<'a> Lowerer<'a> {
-    fn new(function_returns: &'a HashMap<String, Type>) -> Self {
+    fn new(
+        function_returns: &'a HashMap<String, Type>,
+        expression_types: Option<&'a HashMap<usize, Type>>,
+    ) -> Self {
         Self {
             next_binding: 0,
             scopes: Vec::new(),
             function_returns,
+            expression_types,
         }
     }
 
@@ -624,6 +657,11 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_type(&self, expression: &lyra_ast::Expression) -> Type {
+        if let Some(types) = self.expression_types {
+            return *types
+                .get(&(expression as *const lyra_ast::Expression as usize))
+                .expect("validated expression must have a semantic type");
+        }
         match expression {
             lyra_ast::Expression::Integer(..) => Type::Integer,
             lyra_ast::Expression::Float(..) => Type::Float,
