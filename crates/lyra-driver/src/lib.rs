@@ -24,6 +24,17 @@ fn has_errors(diagnostics: &[Diagnostic]) -> bool {
         .any(|diagnostic| diagnostic.severity == Severity::Error)
 }
 
+fn convert_semantic_type(ty: lyra_semantics::Type) -> lyra_ir::Type {
+    match ty {
+        lyra_semantics::Type::Integer => lyra_ir::Type::Integer,
+        lyra_semantics::Type::Float => lyra_ir::Type::Float,
+        lyra_semantics::Type::String => lyra_ir::Type::String,
+        lyra_semantics::Type::Boolean => lyra_ir::Type::Boolean,
+        lyra_semantics::Type::Unit => lyra_ir::Type::Unit,
+        lyra_semantics::Type::Unknown => lyra_ir::Type::Unknown,
+    }
+}
+
 #[must_use]
 pub fn compile(source: &str) -> CompileOutput {
     let lexed = lyra_lexer::tokenize(source);
@@ -33,20 +44,13 @@ pub fn compile(source: &str) -> CompileOutput {
     diagnostics.extend(parser_diagnostics);
 
     let mut function_signatures = HashMap::new();
+    let mut expression_types = HashMap::new();
     if !has_errors(&diagnostics) {
         let analysis = lyra_semantics::analyze(&module);
         function_signatures = analysis
             .function_signatures
             .iter()
             .map(|(name, signature)| {
-                let convert_type = |ty| match ty {
-                    lyra_semantics::Type::Integer => lyra_ir::Type::Integer,
-                    lyra_semantics::Type::Float => lyra_ir::Type::Float,
-                    lyra_semantics::Type::String => lyra_ir::Type::String,
-                    lyra_semantics::Type::Boolean => lyra_ir::Type::Boolean,
-                    lyra_semantics::Type::Unit => lyra_ir::Type::Unit,
-                    lyra_semantics::Type::Unknown => lyra_ir::Type::Unknown,
-                };
                 (
                     name.clone(),
                     (
@@ -54,20 +58,26 @@ pub fn compile(source: &str) -> CompileOutput {
                             .parameters
                             .iter()
                             .copied()
-                            .map(convert_type)
+                            .map(convert_semantic_type)
                             .collect(),
-                        convert_type(signature.return_type),
+                        convert_semantic_type(signature.return_type),
                     ),
                 )
             })
+            .collect();
+        expression_types = analysis
+            .expression_types
+            .into_iter()
+            .map(|(id, ty)| (id, convert_semantic_type(ty)))
             .collect();
         diagnostics.extend(analysis.diagnostics);
     }
 
     let ir = if !has_errors(&diagnostics) {
-        Some(lyra_ir::lower_with_signatures(
+        Some(lyra_ir::lower_with_typed_signatures(
             &module,
             &function_signatures,
+            Some(&expression_types),
         ))
     } else {
         None
