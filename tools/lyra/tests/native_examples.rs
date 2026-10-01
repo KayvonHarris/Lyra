@@ -22,16 +22,16 @@ fn v01_examples_compile_and_run_natively() {
             .expect("Lyra CLI should execute the example");
 
         assert_eq!(
-        output.status.code(),
-        Some(42),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+            output.status.code(),
+            Some(42),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(
-        String::from_utf8_lossy(&output.stdout).contains("Program exited with code 42"),
-        "stdout was: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+            String::from_utf8_lossy(&output.stdout).contains("Program exited with code 42"),
+            "stdout was: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
 }
