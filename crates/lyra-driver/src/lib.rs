@@ -45,6 +45,7 @@ pub fn compile(source: &str) -> CompileOutput {
 
     let mut function_signatures = HashMap::new();
     let mut expression_types = HashMap::new();
+    let mut numeric_conversions = HashMap::new();
     if !has_errors(&diagnostics) {
         let analysis = lyra_semantics::analyze(&module);
         function_signatures = analysis
@@ -70,6 +71,7 @@ pub fn compile(source: &str) -> CompileOutput {
             .into_iter()
             .map(|(id, ty)| (id, convert_semantic_type(ty)))
             .collect();
+        numeric_conversions = analysis.numeric_conversions;
         diagnostics.extend(analysis.diagnostics);
     }
 
@@ -78,6 +80,7 @@ pub fn compile(source: &str) -> CompileOutput {
             &module,
             &function_signatures,
             Some(&expression_types),
+            Some(&numeric_conversions),
         ))
     } else {
         None
