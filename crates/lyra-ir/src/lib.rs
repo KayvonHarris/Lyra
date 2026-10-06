@@ -380,48 +380,67 @@ impl Value {
     }
 }
 
+/// Consume semantic expression types for the exact AST that was validated.
+/// Expression identities are addresses within that borrowed AST, not source spans.
 #[must_use]
-pub fn lower(module: &lyra_ast::Module) -> Module {
-    let function_returns = module
-        .items
+pub fn lower_with_typed_signatures(
+    module: &lyra_ast::Module,
+    signatures: &HashMap<String, (Vec<Type>, Type)>,
+    expression_types: Option<&HashMap<usize, Type>>,
+    numeric_conversions: Option<&HashMap<usize, (bool, bool)>>,
+) -> Module {
+    let returns = signatures
         .iter()
-        .map(|item| match item {
-            lyra_ast::Item::Function(function) => (
-                function.name.clone(),
-                function
-                    .return_type
-                    .as_ref()
-                    .map_or(Type::Integer, lower_type_name),
-            ),
-        })
+        .map(|(name, (_, result))| (name.clone(), *result))
         .collect::<HashMap<_, _>>();
-
     Module {
         functions: module
             .items
             .iter()
             .map(|item| match item {
-                lyra_ast::Item::Function(function) => lower_function(function, &function_returns),
+                lyra_ast::Item::Function(function) => {
+                    let (parameters, result) = signatures
+                        .get(&function.name)
+                        .expect("validated functions must have semantic signatures");
+                    lower_function_typed(
+                        function,
+                        &returns,
+                        Some(parameters),
+                        Some(*result),
+                        expression_types,
+                        numeric_conversions,
+                    )
+                }
             })
             .collect(),
     }
 }
 
-fn lower_function(
+fn lower_function_typed(
     function: &lyra_ast::Function,
     function_returns: &HashMap<String, Type>,
+    parameter_types: Option<&[Type]>,
+    return_type: Option<Type>,
+    expression_types: Option<&HashMap<usize, Type>>,
+    numeric_conversions: Option<&HashMap<usize, (bool, bool)>>,
 ) -> Function {
-    let mut lowerer = Lowerer::new(function_returns);
+    let mut lowerer = Lowerer::new(function_returns, expression_types, numeric_conversions);
     lowerer.push_scope();
 
     let parameters = function
         .parameters
         .iter()
-        .map(|parameter| {
-            let ty = parameter
-                .type_name
-                .as_ref()
-                .map_or(Type::Integer, lower_type_name);
+        .enumerate()
+        .map(|(index, parameter)| {
+            let ty = parameter_types.map_or_else(
+                || {
+                    parameter
+                        .type_name
+                        .as_ref()
+                        .map_or(Type::Integer, lower_type_name)
+                },
+                |types| types[index],
+            );
             let binding = lowerer.declare(&parameter.name, ty);
             Parameter {
                 name: parameter.name.clone(),
@@ -438,10 +457,12 @@ fn lower_function(
     Function {
         name: function.name.clone(),
         parameters,
-        return_type: function
-            .return_type
-            .as_ref()
-            .map_or(Type::Integer, lower_type_name),
+        return_type: return_type.unwrap_or_else(|| {
+            function
+                .return_type
+                .as_ref()
+                .map_or(Type::Integer, lower_type_name)
+        }),
         body,
         span: function.span,
     }
@@ -451,14 +472,22 @@ struct Lowerer<'a> {
     next_binding: usize,
     scopes: Vec<HashMap<String, (BindingId, Type)>>,
     function_returns: &'a HashMap<String, Type>,
+    expression_types: Option<&'a HashMap<usize, Type>>,
+    numeric_conversions: Option<&'a HashMap<usize, (bool, bool)>>,
 }
 
 impl<'a> Lowerer<'a> {
-    fn new(function_returns: &'a HashMap<String, Type>) -> Self {
+    fn new(
+        function_returns: &'a HashMap<String, Type>,
+        expression_types: Option<&'a HashMap<usize, Type>>,
+        numeric_conversions: Option<&'a HashMap<usize, (bool, bool)>>,
+    ) -> Self {
         Self {
             next_binding: 0,
             scopes: Vec::new(),
             function_returns,
+            expression_types,
+            numeric_conversions,
         }
     }
 
@@ -587,51 +616,11 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_type(&self, expression: &lyra_ast::Expression) -> Type {
-        match expression {
-            lyra_ast::Expression::Integer(..) => Type::Integer,
-            lyra_ast::Expression::Float(..) => Type::Float,
-            lyra_ast::Expression::String(..) => Type::String,
-            lyra_ast::Expression::Boolean(..) => Type::Boolean,
-            lyra_ast::Expression::Identifier(name, _) => self.resolve_type(name),
-            lyra_ast::Expression::Call { callee, .. } => *self
-                .function_returns
-                .get(callee)
-                .expect("semantic analysis guarantees resolved function calls"),
-            lyra_ast::Expression::Unary {
-                operator, operand, ..
-            } => match operator {
-                lyra_ast::UnaryOperator::Negate => self.expression_type(operand),
-                lyra_ast::UnaryOperator::Not => Type::Boolean,
-            },
-            lyra_ast::Expression::Binary {
-                left,
-                operator,
-                right,
-                ..
-            } => match operator {
-                lyra_ast::BinaryOperator::Add
-                | lyra_ast::BinaryOperator::Subtract
-                | lyra_ast::BinaryOperator::Multiply
-                | lyra_ast::BinaryOperator::Divide
-                | lyra_ast::BinaryOperator::Remainder => {
-                    if self.expression_type(left) == Type::Float
-                        || self.expression_type(right) == Type::Float
-                    {
-                        Type::Float
-                    } else {
-                        Type::Integer
-                    }
-                }
-                lyra_ast::BinaryOperator::Equal
-                | lyra_ast::BinaryOperator::NotEqual
-                | lyra_ast::BinaryOperator::Less
-                | lyra_ast::BinaryOperator::LessEqual
-                | lyra_ast::BinaryOperator::Greater
-                | lyra_ast::BinaryOperator::GreaterEqual
-                | lyra_ast::BinaryOperator::And
-                | lyra_ast::BinaryOperator::Or => Type::Boolean,
-            },
-        }
+        *self
+            .expression_types
+            .expect("validated IR lowering requires semantic expression types")
+            .get(&(expression as *const lyra_ast::Expression as usize))
+            .expect("validated expression must have a semantic type")
     }
 
     fn lower_expression(&self, expression: &lyra_ast::Expression) -> Value {
@@ -677,13 +666,24 @@ impl<'a> Lowerer<'a> {
                 let mut left = self.lower_expression(left);
                 let mut right = self.lower_expression(right);
 
-                if is_numeric_operator(*operator)
-                    && matches!(
-                        (left_type, right_type),
-                        (Type::Integer, Type::Float) | (Type::Float, Type::Integer)
-                    )
-                {
-                    if left_type == Type::Integer {
+                let (convert_left, convert_right) =
+                    if let Some(conversions) = self.numeric_conversions {
+                        conversions
+                            .get(&(expression as *const lyra_ast::Expression as usize))
+                            .copied()
+                            .unwrap_or((false, false))
+                    } else if is_numeric_operator(*operator)
+                        && matches!(
+                            (left_type, right_type),
+                            (Type::Integer, Type::Float) | (Type::Float, Type::Integer)
+                        )
+                    {
+                        (left_type == Type::Integer, right_type == Type::Integer)
+                    } else {
+                        (false, false)
+                    };
+                if convert_left || convert_right {
+                    if convert_left {
                         let span = left.span();
                         left = Value::Convert {
                             value: Box::new(left),
@@ -692,7 +692,7 @@ impl<'a> Lowerer<'a> {
                             span,
                         };
                     }
-                    if right_type == Type::Integer {
+                    if convert_right {
                         let span = right.span();
                         right = Value::Convert {
                             value: Box::new(right),
@@ -1240,7 +1240,48 @@ mod tests {
         assert!(parser_diagnostics.is_empty());
         let analysis = lyra_semantics::analyze(&ast);
         assert!(analysis.diagnostics.is_empty());
-        lower(&ast)
+
+        let signatures = analysis
+            .function_signatures
+            .iter()
+            .map(|(name, signature)| {
+                (
+                    name.clone(),
+                    (
+                        signature
+                            .parameters
+                            .iter()
+                            .copied()
+                            .map(convert_semantic_type)
+                            .collect(),
+                        convert_semantic_type(signature.return_type),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let expression_types = analysis
+            .expression_types
+            .iter()
+            .map(|(id, ty)| (*id, convert_semantic_type(*ty)))
+            .collect::<HashMap<_, _>>();
+
+        lower_with_typed_signatures(
+            &ast,
+            &signatures,
+            Some(&expression_types),
+            Some(&analysis.numeric_conversions),
+        )
+    }
+
+    fn convert_semantic_type(ty: lyra_semantics::Type) -> Type {
+        match ty {
+            lyra_semantics::Type::Integer => Type::Integer,
+            lyra_semantics::Type::Float => Type::Float,
+            lyra_semantics::Type::String => Type::String,
+            lyra_semantics::Type::Boolean => Type::Boolean,
+            lyra_semantics::Type::Unit => Type::Unit,
+            lyra_semantics::Type::Unknown => Type::Unknown,
+        }
     }
 
     #[test]

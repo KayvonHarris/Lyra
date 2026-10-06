@@ -5,6 +5,22 @@ This roadmap records direction rather than a release guarantee.
 ## v0.1 — Core language
 Frontend, diagnostics, semantic analysis, types, Lyra IR, LLVM code generation, and native execution for a deliberately small language subset.
 
+### v0.1 acceptance requirements
+
+A v0.1 release candidate must satisfy all of the following:
+
+- parse and validate functions, typed parameters and returns, lexical bindings, mutable variables, assignments, conditionals, and loops
+- support `Int`, `Float`, `Bool`, `String`, and `Unit` through semantic analysis
+- make semantic analysis the source of truth for validated function signatures, expression types, and implicit numeric promotion
+- lower validated programs through Lyra IR to LLVM without independently re-inferring source-language types in the production compiler path
+- preserve explicit `Int` to `Float` conversions for mixed numeric arithmetic, comparisons, and equality
+- compile and execute representative native programs through the `lyra run` CLI
+- keep factorial, Fibonacci, integer execution, and mixed-numeric Float/control-flow programs as executable regression coverage
+- reject invalid programs before IR/code generation with diagnostics
+- pass formatting, workspace checks, Clippy with warnings denied, the full test suite, and release builds in CI
+
+The v0.1 subset is testable when these requirements are green on the protected pull-request workflow. Features listed for v0.2 and later are not v0.1 blockers.
+
 ## v0.2 — Systems foundation
 Memory-safety model, generics, traits/interfaces, pattern matching, concurrency, FFI/ABI, and `no_std` foundations.
 

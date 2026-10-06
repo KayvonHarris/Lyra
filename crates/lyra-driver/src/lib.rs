@@ -1,5 +1,7 @@
 //! Compiler pipeline orchestration.
 
+use std::collections::HashMap;
+
 use lyra_ast::Module;
 use lyra_diagnostics::{Diagnostic, Severity};
 
@@ -22,6 +24,17 @@ fn has_errors(diagnostics: &[Diagnostic]) -> bool {
         .any(|diagnostic| diagnostic.severity == Severity::Error)
 }
 
+fn convert_semantic_type(ty: lyra_semantics::Type) -> lyra_ir::Type {
+    match ty {
+        lyra_semantics::Type::Integer => lyra_ir::Type::Integer,
+        lyra_semantics::Type::Float => lyra_ir::Type::Float,
+        lyra_semantics::Type::String => lyra_ir::Type::String,
+        lyra_semantics::Type::Boolean => lyra_ir::Type::Boolean,
+        lyra_semantics::Type::Unit => lyra_ir::Type::Unit,
+        lyra_semantics::Type::Unknown => lyra_ir::Type::Unknown,
+    }
+}
+
 #[must_use]
 pub fn compile(source: &str) -> CompileOutput {
     let lexed = lyra_lexer::tokenize(source);
@@ -30,12 +43,45 @@ pub fn compile(source: &str) -> CompileOutput {
     let mut diagnostics = lexed.diagnostics;
     diagnostics.extend(parser_diagnostics);
 
+    let mut function_signatures = HashMap::new();
+    let mut expression_types = HashMap::new();
+    let mut numeric_conversions = HashMap::new();
     if !has_errors(&diagnostics) {
-        diagnostics.extend(lyra_semantics::analyze(&module).diagnostics);
+        let analysis = lyra_semantics::analyze(&module);
+        function_signatures = analysis
+            .function_signatures
+            .iter()
+            .map(|(name, signature)| {
+                (
+                    name.clone(),
+                    (
+                        signature
+                            .parameters
+                            .iter()
+                            .copied()
+                            .map(convert_semantic_type)
+                            .collect(),
+                        convert_semantic_type(signature.return_type),
+                    ),
+                )
+            })
+            .collect();
+        expression_types = analysis
+            .expression_types
+            .into_iter()
+            .map(|(id, ty)| (id, convert_semantic_type(ty)))
+            .collect();
+        numeric_conversions = analysis.numeric_conversions;
+        diagnostics.extend(analysis.diagnostics);
     }
 
     let ir = if !has_errors(&diagnostics) {
-        Some(lyra_ir::lower(&module))
+        Some(lyra_ir::lower_with_typed_signatures(
+            &module,
+            &function_signatures,
+            Some(&expression_types),
+            Some(&numeric_conversions),
+        ))
     } else {
         None
     };
@@ -100,6 +146,48 @@ mod tests {
         let output = compile("fn is_fast() -> Bool { let speed = 65.0; return speed >= 60; }");
         assert!(output.diagnostics.is_empty());
         assert!(output.ir.is_some());
+    }
+
+    #[test]
+    fn production_ir_uses_semantic_numeric_conversion_plan() {
+        let output = compile(
+            "fn promote(value: Float) -> Float { return (1 + value) * 2; } fn main() -> Int { return 0; }",
+        );
+        assert!(output.diagnostics.is_empty());
+        let ir = output.ir.expect("valid program should lower to IR");
+        let function = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "promote")
+            .expect("promote function should exist");
+        let lyra_ir::Instruction::Return {
+            value: Some(lyra_ir::Value::Binary { left, right, .. }),
+            ..
+        } = &function.body.instructions[0]
+        else {
+            panic!("expected promoted binary return");
+        };
+
+        assert!(matches!(
+            left.as_ref(),
+            lyra_ir::Value::Binary { left, .. }
+                if matches!(
+                    left.as_ref(),
+                    lyra_ir::Value::Convert {
+                        from: lyra_ir::Type::Integer,
+                        to: lyra_ir::Type::Float,
+                        ..
+                    }
+                )
+        ));
+        assert!(matches!(
+            right.as_ref(),
+            lyra_ir::Value::Convert {
+                from: lyra_ir::Type::Integer,
+                to: lyra_ir::Type::Float,
+                ..
+            }
+        ));
     }
 
     #[test]
