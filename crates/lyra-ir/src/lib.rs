@@ -1337,7 +1337,48 @@ mod tests {
         assert!(parser_diagnostics.is_empty());
         let analysis = lyra_semantics::analyze(&ast);
         assert!(analysis.diagnostics.is_empty());
-        lower(&ast)
+
+        let signatures = analysis
+            .function_signatures
+            .iter()
+            .map(|(name, signature)| {
+                (
+                    name.clone(),
+                    (
+                        signature
+                            .parameters
+                            .iter()
+                            .copied()
+                            .map(convert_semantic_type)
+                            .collect(),
+                        convert_semantic_type(signature.return_type),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let expression_types = analysis
+            .expression_types
+            .iter()
+            .map(|(id, ty)| (*id, convert_semantic_type(*ty)))
+            .collect::<HashMap<_, _>>();
+
+        lower_with_typed_signatures(
+            &ast,
+            &signatures,
+            Some(&expression_types),
+            Some(&analysis.numeric_conversions),
+        )
+    }
+
+    fn convert_semantic_type(ty: lyra_semantics::Type) -> Type {
+        match ty {
+            lyra_semantics::Type::Integer => Type::Integer,
+            lyra_semantics::Type::Float => Type::Float,
+            lyra_semantics::Type::String => Type::String,
+            lyra_semantics::Type::Boolean => Type::Boolean,
+            lyra_semantics::Type::Unit => Type::Unit,
+            lyra_semantics::Type::Unknown => Type::Unknown,
+        }
     }
 
     #[test]
