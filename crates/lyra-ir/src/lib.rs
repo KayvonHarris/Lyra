@@ -380,33 +380,6 @@ impl Value {
     }
 }
 
-/// Lower an already validated AST using function return types owned by semantic analysis.
-/// All referenced function signatures must be present in the supplied map.
-#[must_use]
-pub fn lower_with_function_returns(
-    module: &lyra_ast::Module,
-    function_returns: &HashMap<String, Type>,
-) -> Module {
-    Module {
-        functions: module
-            .items
-            .iter()
-            .map(|item| match item {
-                lyra_ast::Item::Function(function) => lower_function(function, function_returns),
-            })
-            .collect(),
-    }
-}
-
-/// Lower validated functions using semantic-owned parameter and return types.
-#[must_use]
-pub fn lower_with_signatures(
-    module: &lyra_ast::Module,
-    signatures: &HashMap<String, (Vec<Type>, Type)>,
-) -> Module {
-    lower_with_typed_signatures(module, signatures, None, None)
-}
-
 /// Consume semantic expression types for the exact AST that was validated.
 /// Expression identities are addresses within that borrowed AST, not source spans.
 #[must_use]
@@ -441,31 +414,6 @@ pub fn lower_with_typed_signatures(
             })
             .collect(),
     }
-}
-
-pub fn lower(module: &lyra_ast::Module) -> Module {
-    let function_returns = module
-        .items
-        .iter()
-        .map(|item| match item {
-            lyra_ast::Item::Function(function) => (
-                function.name.clone(),
-                function
-                    .return_type
-                    .as_ref()
-                    .map_or(Type::Integer, lower_type_name),
-            ),
-        })
-        .collect::<HashMap<_, _>>();
-
-    lower_with_function_returns(module, &function_returns)
-}
-
-fn lower_function(
-    function: &lyra_ast::Function,
-    function_returns: &HashMap<String, Type>,
-) -> Function {
-    lower_function_typed(function, function_returns, None, None, None, None)
 }
 
 fn lower_function_typed(
@@ -668,56 +616,11 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expression_type(&self, expression: &lyra_ast::Expression) -> Type {
-        if let Some(types) = self.expression_types {
-            return *types
-                .get(&(expression as *const lyra_ast::Expression as usize))
-                .expect("validated expression must have a semantic type");
-        }
-        match expression {
-            lyra_ast::Expression::Integer(..) => Type::Integer,
-            lyra_ast::Expression::Float(..) => Type::Float,
-            lyra_ast::Expression::String(..) => Type::String,
-            lyra_ast::Expression::Boolean(..) => Type::Boolean,
-            lyra_ast::Expression::Identifier(name, _) => self.resolve_type(name),
-            lyra_ast::Expression::Call { callee, .. } => *self
-                .function_returns
-                .get(callee)
-                .expect("semantic analysis guarantees resolved function calls"),
-            lyra_ast::Expression::Unary {
-                operator, operand, ..
-            } => match operator {
-                lyra_ast::UnaryOperator::Negate => self.expression_type(operand),
-                lyra_ast::UnaryOperator::Not => Type::Boolean,
-            },
-            lyra_ast::Expression::Binary {
-                left,
-                operator,
-                right,
-                ..
-            } => match operator {
-                lyra_ast::BinaryOperator::Add
-                | lyra_ast::BinaryOperator::Subtract
-                | lyra_ast::BinaryOperator::Multiply
-                | lyra_ast::BinaryOperator::Divide
-                | lyra_ast::BinaryOperator::Remainder => {
-                    if self.expression_type(left) == Type::Float
-                        || self.expression_type(right) == Type::Float
-                    {
-                        Type::Float
-                    } else {
-                        Type::Integer
-                    }
-                }
-                lyra_ast::BinaryOperator::Equal
-                | lyra_ast::BinaryOperator::NotEqual
-                | lyra_ast::BinaryOperator::Less
-                | lyra_ast::BinaryOperator::LessEqual
-                | lyra_ast::BinaryOperator::Greater
-                | lyra_ast::BinaryOperator::GreaterEqual
-                | lyra_ast::BinaryOperator::And
-                | lyra_ast::BinaryOperator::Or => Type::Boolean,
-            },
-        }
+        *self
+            .expression_types
+            .expect("validated IR lowering requires semantic expression types")
+            .get(&(expression as *const lyra_ast::Expression as usize))
+            .expect("validated expression must have a semantic type")
     }
 
     fn lower_expression(&self, expression: &lyra_ast::Expression) -> Value {
