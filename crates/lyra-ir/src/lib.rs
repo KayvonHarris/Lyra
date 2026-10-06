@@ -763,23 +763,22 @@ impl<'a> Lowerer<'a> {
                 let mut left = self.lower_expression(left);
                 let mut right = self.lower_expression(right);
 
-                let (convert_left, convert_right) = if let Some(conversions) =
-                    self.numeric_conversions
-                {
-                    conversions
-                        .get(&(expression as *const lyra_ast::Expression as usize))
-                        .copied()
-                        .unwrap_or((false, false))
-                } else if is_numeric_operator(*operator)
-                    && matches!(
-                        (left_type, right_type),
-                        (Type::Integer, Type::Float) | (Type::Float, Type::Integer)
-                    )
-                {
-                    (left_type == Type::Integer, right_type == Type::Integer)
-                } else {
-                    (false, false)
-                };
+                let (convert_left, convert_right) =
+                    if let Some(conversions) = self.numeric_conversions {
+                        conversions
+                            .get(&(expression as *const lyra_ast::Expression as usize))
+                            .copied()
+                            .unwrap_or((false, false))
+                    } else if is_numeric_operator(*operator)
+                        && matches!(
+                            (left_type, right_type),
+                            (Type::Integer, Type::Float) | (Type::Float, Type::Integer)
+                        )
+                    {
+                        (left_type == Type::Integer, right_type == Type::Integer)
+                    } else {
+                        (false, false)
+                    };
                 if convert_left || convert_right {
                     if convert_left {
                         let span = left.span();
