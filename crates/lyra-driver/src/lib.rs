@@ -149,6 +149,48 @@ mod tests {
     }
 
     #[test]
+    fn production_ir_uses_semantic_numeric_conversion_plan() {
+        let output = compile(
+            "fn promote(value: Float) -> Float { return (1 + value) * 2; } fn main() -> Int { return 0; }",
+        );
+        assert!(output.diagnostics.is_empty());
+        let ir = output.ir.expect("valid program should lower to IR");
+        let function = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "promote")
+            .expect("promote function should exist");
+        let lyra_ir::Instruction::Return {
+            value: Some(lyra_ir::Value::Binary { left, right, .. }),
+            ..
+        } = &function.body.instructions[0]
+        else {
+            panic!("expected promoted binary return");
+        };
+
+        assert!(matches!(
+            left.as_ref(),
+            lyra_ir::Value::Binary { left, .. }
+                if matches!(
+                    left.as_ref(),
+                    lyra_ir::Value::Convert {
+                        from: lyra_ir::Type::Integer,
+                        to: lyra_ir::Type::Float,
+                        ..
+                    }
+                )
+        ));
+        assert!(matches!(
+            right.as_ref(),
+            lyra_ir::Value::Convert {
+                from: lyra_ir::Type::Integer,
+                to: lyra_ir::Type::Float,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn emits_llvm_for_integer_program() {
         let llvm = compile_to_llvm("fn main() { return 40 + 2; }")
             .expect("valid integer program should lower to LLVM IR");
